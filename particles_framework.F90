@@ -1,5 +1,6 @@
 module particles_framework
 
+use constants_mod, only: radius, pi, omega, HLF
 
 use mpp_domains_mod, only: domain2D
 use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
@@ -13,6 +14,8 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 implicit none ; private
 
 integer, parameter :: buffer_width=20 ! size of buffer dimension for comms
+integer, parameter :: buffer_width_traj=20  ! LUYU: modify this later. use?
+integer, parameter :: nclasses=10 ! Number of particles classes
 
 logical :: folded_north_on_pe = .false.
 logical :: verbose=.false. ! Be verbose to stderr
@@ -31,28 +34,30 @@ logical :: force_all_pes_traj=.false. ! Force all pes write trajectory files reg
 !Public params !Niki: write a subroutine to expose these
 public nclasses,buffer_width,buffer_width_traj
 public verbose, really_debug, debug, restart_input_dir
-public ignore_ij_restart, use_slow_find,generate_test_particles
+public use_slow_find,generate_test_particles
 public orig_read, force_all_pes_traj
-
+public pi_180
 
 !Public types
 public particles_gridded, xyt, particle, particles, buffer 
 
 !Public subs
 public particles_framework_init
-public send_part_to_other_pes
+public send_parts_to_other_pes
 public pack_part_into_buffer2, unpack_part_from_buffer2
 public pack_traj_into_buffer2, unpack_traj_from_buffer2
 public increase_buffer, increase_ibuffer, increase_ibuffer_traj, increase_buffer_traj
 public add_new_part_to_list, count_out_of_order, check_for_duplicates
 public insert_part_into_list, create_particle, delete_particle_from_list, destroy_particle
-public print_fld,print_part, print_part,record_posn, push_posn, append_posn, check_position
+public print_fld,print_part,print_parts, record_posn, push_posn, append_posn, check_position
 public move_trajectory, move_all_trajectories
 public find_cell,find_cell_by_search,count_parts,is_point_in_cell,pos_within_cell
 public sum_mass,sum_heat,bilin,yearday,parts_chksum
 public checksum_gridded
 public grd_chksum2,grd_chksum3
 public fix_restart_dates
+public offset_part_dates
+public unitTests
 
 type :: particles_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -73,9 +78,11 @@ type :: particles_gridded
   real, dimension(:,:), pointer :: ocean_depth=>NULL() ! Depth of ocean (m)
   real, dimension(:,:), pointer :: uo=>null() ! Ocean zonal flow (m/s)
   real, dimension(:,:), pointer :: vo=>null() ! Ocean meridional flow (m/s)
+  real, dimension(:,:), pointer :: tmp=>null() ! Temporary work space
+  real, dimension(:,:), pointer :: tmpc=>null() ! Temporary work space
   real, dimension(:,:), pointer :: parity_x=>null() ! X component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
   real, dimension(:,:), pointer :: parity_y=>null() ! Y component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
-  integer, dimension(:,:), pointer :: particle_counter=>null() ! Counts particles created for naming purposes
+  integer, dimension(:,:), pointer :: particle_num=>null() ! Counts particles created for naming purposes
 end type particles_gridded
 
 type :: xyt
@@ -173,27 +180,10 @@ contains
 
 ! ##############################################################################
 
-subroutine particle_framework_init(parts, &
+subroutine particles_framework_init(parts, &
              gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
              cos_rot, sin_rot, ocean_depth, maskmap, fractional_area)
-
-use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
-use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
-use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain, mpp_get_global_domain
-use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
-use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
-use mpp_domains_mod, only: mpp_define_io_domain
-
-use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, input_nml_file
-use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
-
-use fms_mod, only: open_namelist_file, check_nml_error, close_file
-use fms_mod, only: clock_flag_default
-
-use diag_manager_mod, only: register_diag_field, register_static_field, send_data
-use diag_manager_mod, only: diag_axis_init
-
 ! Arguments
 type(particles), pointer :: parts
 integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
@@ -207,424 +197,7 @@ real, dimension(:,:), intent(in),optional :: ocean_depth
 logical, intent(in), optional :: maskmap(:,:)
 logical, intent(in), optional :: fractional_area
 
-! Namelist parameters (and defaults)
-integer :: halo=4 ! Width of halo region
-integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
-integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
-integer :: verbose_hrs=24 ! Period between verbose messages
-real :: rho_parts=850. ! Density of particles
-real :: spring_coef=1.e-4  ! Spring contant for particle interactions - Alon
-real :: radial_damping_coef=1.e-4     ! Coef for relative particle motion damping (radial component) -Alon
-real :: tangental_damping_coef=2.e-5     ! Coef for relative particle motion damping (tangental component) -Alon
-real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved particles
-real :: party_bit_erosion_fraction=0. ! Fraction of erosion melt flux to divert to party bits
-real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
-logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
-logical :: add_weight_to_ocean=.true. ! Add weight of particles + bits to ocean
-logical :: passive_mode=.false. ! Add weight of particles + bits to ocean
-logical :: time_average_weight=.false. ! Time average the weight on the ocean
-real :: speed_limit=0. ! CFL speed limit for a part
-real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
-real :: tip_parameter=0. ! parameter to override particle rollilng critica ratio (use zero to get parameter directly from ice and seawater densities
-real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
-logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
-logical :: use_updated_rolling_scheme=.false. ! Use the corrected Rolling Scheme rather than the erronios one
-logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective particle scheme- Added by Alon 
-logical :: interactive_particles_on=.false.  !Turn on/off interactions between particles  - Added by Alon 
-logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative particle velocity to critical value - Added by Alon 
-logical :: do_unit_tests=.false. ! Conduct some unit tests
-logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
-logical :: read_old_restarts=.true. ! If true, read restarts prior to grid_of_lists and particle_num innovations
-real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between particle classes (kg)
-real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
-real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real particle mass (non-dim)
-real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved parts (m)
-namelist /particles_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, traj_write_hrs, &
-         distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef, radial_damping_coef, tangental_damping_coef, &
-         rho_parts, LoW_ratio, debug, really_debug, use_operator_splitting, party_bit_erosion_fraction, use_updated_rolling_scheme, &
-         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, tip_parameter, &
-         time_average_weight, generate_test_particles, speed_limit, fix_restart_dates, Runge_not_Verlet, interactive_particles_on, critical_interaction_damping_on, &
-         make_calving_reproduce,restart_input_dir, orig_read               ,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
-         read_old_restarts,tau_calving
-
-! Local variables
-integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
-type(particles_gridded), pointer :: grd
-real :: minl
-logical :: lerr
-integer :: stdlogunit, stderrunit
-real :: Total_mass  !Added by Alon 
-
-  ! Get the stderr and stdlog unit numbers
-  stderrunit=stderr()
-  stdlogunit=stdlog()
-  write(stdlogunit,*) "ice_parts_framework: "//trim(version)
-
-! Read namelist parameters
- !write(stderrunit,*) 'diamonds: reading namelist'
-#ifdef INTERNAL_FILE_NML
-  read (input_nml_file, nml=particles_nml, iostat=ierr)
-#else
-  iunit = open_namelist_file()
-  read  (iunit, particles_nml,iostat=ierr)
-  call close_file (iunit)
-#endif
-  ierr = check_nml_error(ierr,'particles_nml')
-
-  if (really_debug) debug=.true. ! One implies the other...
-
-  write (stdlogunit, particles_nml)
-
-
-! Allocate overall structure
- !write(stderrunit,*) 'diamonds: allocating parts'
-  allocate(parts)
-  allocate(parts%grd)
-  grd=>parts%grd ! For convenience to avoid parts%grd%X
- !write(stderrunit,*) 'diamonds: allocating domain'
-  allocate(grd%domain)
-
-! Clocks
-  parts%clock=mpp_clock_id( 'Particles', flags=clock_flag_default, grain=CLOCK_COMPONENT )
-  parts%clock_mom=mpp_clock_id( 'Particles-momentum', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_the=mpp_clock_id( 'Particles-thermodyn', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_int=mpp_clock_id( 'Particles-interface', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_cal=mpp_clock_id( 'Particles-calving', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_com=mpp_clock_id( 'Particles-communication', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_ini=mpp_clock_id( 'Particles-initialization', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_ior=mpp_clock_id( 'Particles-I/O read', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_iow=mpp_clock_id( 'Particles-I/O write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_dia=mpp_clock_id( 'Particles-diagnostics', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-
-  call mpp_clock_begin(parts%clock)
-  call mpp_clock_begin(parts%clock_ini)
-
-! Set up particle domain
- !write(stderrunit,*) 'diamonds: defining domain'
-  call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
-                           maskmap=maskmap, &
-                           xflags=dom_x_flags, xhalo=halo,  &
-                           yflags=dom_y_flags, yhalo=halo, name='diamond')
-
-  call mpp_define_io_domain(grd%domain, io_layout)
-
- !write(stderrunit,*) 'diamond: get compute domain'
-  call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
-  call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
-  call mpp_get_global_domain( grd%domain, grd%isg, grd%ieg, grd%jsg, grd%jeg )
-
-  call mpp_get_neighbor_pe(grd%domain, NORTH, grd%pe_N)
-  call mpp_get_neighbor_pe(grd%domain, SOUTH, grd%pe_S)
-  call mpp_get_neighbor_pe(grd%domain, EAST, grd%pe_E)
-  call mpp_get_neighbor_pe(grd%domain, WEST, grd%pe_W)
-
-
-  folded_north_on_pe = ((dom_y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == gnj)) 
- !write(stderrunit,'(a,6i4)') 'diamonds, particles_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
-
- !if (verbose) &
- !write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, particles_init: (',mpp_pe(),') [ij][se]c=', &
- !     grd%isc,grd%iec,grd%jsc,grd%jec, &
- !     ' [lon|lat][min|max]=', minval(ice_lon),maxval(ice_lon),minval(ice_lat),maxval(ice_lat)
- !write(stderrunit,*) 'diamonds, int args = ', mpp_pe(),gni, gnj, layout, axes
-
-
- !write(stderrunit,*) 'diamonds: allocating grid'
-  allocate( grd%lon(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lon(:,:)=999.
-  allocate( grd%lat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lat(:,:)=999.
-  allocate( grd%lonc(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lon(:,:)=999.
-  allocate( grd%latc(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lat(:,:)=999.
-  allocate( grd%dx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%dx(:,:)=0.
-  allocate( grd%dy(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%dy(:,:)=0.
-  allocate( grd%msk(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%msk(:,:)=0.
-  allocate( grd%cos(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cos(:,:)=1.
-  allocate( grd%sin(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sin(:,:)=0.
-  allocate( grd%ocean_depth(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ocean_depth(:,:)=0.
-  allocate( grd%calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving(:,:)=0.
-  allocate( grd%calving_hflx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving_hflx(:,:)=0.
-  allocate( grd%stored_heat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%stored_heat(:,:)=0.
-  allocate( grd%floating_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%floating_melt(:,:)=0.
-  allocate( grd%part_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%part_melt(:,:)=0.
-  allocate( grd%melt_buoy(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_buoy(:,:)=0.
-  allocate( grd%melt_eros(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_eros(:,:)=0.
-  allocate( grd%melt_conv(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_conv(:,:)=0.
-  allocate( grd%party_src(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%party_src(:,:)=0.
-  allocate( grd%party_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%party_melt(:,:)=0.
-  allocate( grd%party_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%party_mass(:,:)=0.
-  allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
-  allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
-  allocate( grd%mass_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%mass_on_ocean(:,:,:)=0.
-  allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
-  allocate( grd%rmean_calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%rmean_calving(:,:)=0.
-  allocate( grd%rmean_calving_hflx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%rmean_calving_hflx(:,:)=0.
-  allocate( grd%real_calving(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%real_calving(:,:,:)=0.
-  allocate( grd%uo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%uo(:,:)=0.
-  allocate( grd%vo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%vo(:,:)=0.
-  allocate( grd%ui(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ui(:,:)=0.
-  allocate( grd%vi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%vi(:,:)=0.
-  allocate( grd%ua(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ua(:,:)=0.
-  allocate( grd%va(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%va(:,:)=0.
-  allocate( grd%ssh(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ssh(:,:)=0.
-  allocate( grd%sst(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sst(:,:)=0.
-  allocate( grd%cn(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cn(:,:)=0.
-  allocate( grd%hi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%hi(:,:)=0.
-  allocate( grd%tmp(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%tmp(:,:)=0.
-  allocate( grd%tmpc(grd%isc:grd%iec, grd%jsc:grd%jec) ); grd%tmpc(:,:)=0.
-  allocate( parts%nparts_calved_by_class(nclasses) ); parts%nparts_calved_by_class(:)=0
-  allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
-  allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
-  allocate( grd%particle_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%particle_counter_grd(:,:)=1
-
- !write(stderrunit,*) 'diamonds: copying grid'
-  ! Copy data declared on ice model computational domain
-  is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
-  grd%lon(is:ie,js:je)=ice_lon(:,:)
-  grd%lat(is:ie,js:je)=ice_lat(:,:)
-
-  if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(:,:)
-
-  ! Copy data declared on ice model data domain
-  is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
-  grd%dx(is:ie,js:je)=ice_dx(:,:)
-  grd%dy(is:ie,js:je)=ice_dy(:,:)
-  grd%msk(is:ie,js:je)=ice_wet(:,:)
-  grd%cos(is:ie,js:je)=cos_rot(:,:)
-  grd%sin(is:ie,js:je)=sin_rot(:,:)
-
-  call mpp_update_domains(grd%lon, grd%domain, position=CORNER)
-  call mpp_update_domains(grd%lat, grd%domain, position=CORNER)
-  call mpp_update_domains(grd%dy, grd%dx, grd%domain, gridtype=CGRID_NE, flags=SCALAR_PAIR)
-  call mpp_update_domains(grd%area, grd%domain)
-  call mpp_update_domains(grd%msk, grd%domain)
-  call mpp_update_domains(grd%cos, grd%domain, position=CORNER)
-  call mpp_update_domains(grd%sin, grd%domain, position=CORNER)
-  call mpp_update_domains(grd%ocean_depth, grd%domain)
-  call mpp_update_domains(grd%parity_x, grd%parity_y, grd%domain, gridtype=AGRID) ! If either parity_x/y is -ve, we need rotation of vectors
-
-  ! Sanitize lon and lat at the SW edges
-  do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
-      if (grd%lon(i,j).gt.900.) grd%lon(i,j)=grd%lon(i,j+1)
-      if (grd%lat(i,j).gt.900.) grd%lat(i,j)=2.*grd%lat(i,j+1)-grd%lat(i,j+2)
-  enddo; enddo
-
-  if (.not. present(maskmap)) then ! Using a maskmap causes tickles this sanity check
-    do j=grd%jsd,grd%jed; do i=grd%isd,grd%ied
-      if (grd%lon(i,j).gt.900.) write(stderrunit,*) 'bad lon: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lon(i,j)
-      if (grd%lat(i,j).gt.900.) write(stderrunit,*) 'bad lat: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lat(i,j)
-    enddo; enddo
-  endif
-
- !The fix to reproduce across PE layout change, from AJA
-  j=grd%jsc; do i=grd%isc+1,grd%ied
-    minl=grd%lon(i-1,j)-180.
-    if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
-       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo
-  j=grd%jsc; do i=grd%isc-1,grd%isd,-1
-    minl=grd%lon(i+1,j)-180.
-    if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
-       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo
-  do j=grd%jsc+1,grd%jed; do i=grd%isd,grd%ied
-      minl=grd%lon(i,j-1)-180.
-      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
-         grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo; enddo
-  do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
-      minl=grd%lon(i,j+1)-180.
-      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
-         grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo; enddo
-
-  ! lonc, latc used for searches
-  do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
-    grd%lonc(i,j)=0.25*( (grd%lon(i,j)+grd%lon(i-1,j-1)) &
-                        +(grd%lon(i-1,j)+grd%lon(i,j-1)) )
-    grd%latc(i,j)=0.25*( (grd%lat(i,j)+grd%lat(i-1,j-1)) &
-                        +(grd%lat(i-1,j)+grd%lat(i,j-1)) )
-  enddo; enddo
-
-  if (debug) then
-    write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, particles_init: (',mpp_pe(),') [ij][se]c=', &
-         grd%isc,grd%iec,grd%jsc,grd%jec, &
-         ' [lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
-  endif
-
- !if (mpp_pe().eq.3) then
- !  write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
- !  enddo
- !  write(stderrunit,'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
- !  enddo
- !  write(stderrunit,'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
- !  enddo
- !endif
-
-
-!Added by Alon  - If a freq distribution is input, we have to convert the freq distribution to a mass flux distribution)
-if (input_freq_distribution) then
-     Total_mass=0.
-     do j=1,nclasses
-          Total_mass=Total_mass+(distribution(j)*initial_mass(j))
-     enddo
-     do j=1,nclasses
-           distribution(j)=(distribution(j)*initial_mass(j))/Total_mass
-     enddo
-endif 
-
-
- ! Parameters
-  parts%dt=dt
-  parts%traj_sample_hrs=traj_sample_hrs
-  parts%traj_write_hrs=traj_write_hrs
-  parts%verbose_hrs=verbose_hrs
-  parts%grd%halo=halo
-  parts%rho_parts=rho_parts
-  parts%spring_coef=spring_coef
-  parts%radial_damping_coef=radial_damping_coef
-  parts%tangental_damping_coef=tangental_damping_coef
-  parts%LoW_ratio=LoW_ratio
-  parts%use_operator_splitting=use_operator_splitting
-  parts%party_bit_erosion_fraction=party_bit_erosion_fraction
-  parts%sicn_shift=sicn_shift
-  parts%passive_mode=passive_mode
-  parts%time_average_weight=time_average_weight
-  parts%speed_limit=speed_limit
-  parts%tau_calving=tau_calving
-  parts%tip_parameter=tip_parameter
-  parts%Runge_not_Verlet=Runge_not_Verlet   !Alon
-  parts%use_updated_rolling_scheme=use_updated_rolling_scheme  !Alon
-  parts%critical_interaction_damping_on=critical_interaction_damping_on   !Alon
-  parts%interactive_particles_on=interactive_particles_on   !Alon
-  parts%use_new_predictive_corrective=use_new_predictive_corrective  !Alon
-  parts%grounding_fraction=grounding_fraction
-  parts%add_weight_to_ocean=add_weight_to_ocean
-  parts%read_old_restarts=read_old_restarts
-  allocate( parts%initial_mass(nclasses) ); parts%initial_mass(:)=initial_mass(:)
-  allocate( parts%distribution(nclasses) ); parts%distribution(:)=distribution(:)
-  allocate( parts%mass_scaling(nclasses) ); parts%mass_scaling(:)=mass_scaling(:)
-  allocate( parts%initial_thickness(nclasses) ); parts%initial_thickness(:)=initial_thickness(:)
-  allocate( parts%initial_width(nclasses) )
-  allocate( parts%initial_length(nclasses) )
-  parts%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_parts*initial_thickness(:)))
-  parts%initial_length(:)=LoW_ratio*parts%initial_width(:)
-
-  if (parts%read_old_restarts) call error_mesg('diamonds, ice_parts_framework_init', 'Setting "read_old_restarts=.true." can lead to non-reproducing checksums in restarts!', WARNING)
-
-  ! Diagnostics
-  id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'particle mass')
-  axes3d(1:2)=axes
-  axes3d(3)=id_class
-  grd%id_calving=register_diag_field('particles', 'calving', axes, Time, &
-     'Incoming Calving mass rate', 'kg/s')
-  grd%id_calving_hflx_in=register_diag_field('particles', 'calving_hflx_in', axes, Time, &
-     'Incoming Calving heat flux', 'J/s')
-  grd%id_accum=register_diag_field('particles', 'accum_calving', axes, Time, &
-     'Accumulated calving mass rate', 'kg/s')
-  grd%id_unused=register_diag_field('particles', 'unused_calving', axes, Time, &
-     'Unused calving mass rate', 'kg/s')
-  grd%id_floating_melt=register_diag_field('particles', 'melt', axes, Time, &
-     'Melt rate of particles + bits', 'kg/(m^2*s)')
-  grd%id_part_melt=register_diag_field('particles', 'part_melt', axes, Time, &
-     'Melt rate of particles', 'kg/(m^2*s)')
-  grd%id_melt_buoy=register_diag_field('particles', 'melt_buoy', axes, Time, &
-     'Buoyancy component of particle melt rate', 'kg/(m^2*s)')
-  grd%id_melt_eros=register_diag_field('particles', 'melt_eros', axes, Time, &
-     'Erosion component of particle melt rate', 'kg/(m^2*s)')
-  grd%id_melt_conv=register_diag_field('particles', 'melt_conv', axes, Time, &
-     'Convective component of particle melt rate', 'kg/(m^2*s)')
-  grd%id_party_src=register_diag_field('particles', 'party_src', axes, Time, &
-     'Mass source of party bits', 'kg/(m^2*s)')
-  grd%id_party_melt=register_diag_field('particles', 'party_melt', axes, Time, &
-     'Melt rate of party bits', 'kg/(m^2*s)')
-  grd%id_party_mass=register_diag_field('particles', 'party_mass', axes, Time, &
-     'Party bit density field', 'kg/(m^2)')
-  grd%id_virtual_area=register_diag_field('particles', 'virtual_area', axes, Time, &
-     'Virtual coverage by particles', 'm^2')
-  grd%id_mass=register_diag_field('particles', 'mass', axes, Time, &
-     'Particle density field', 'kg/(m^2)')
-  grd%id_mass_on_ocn=register_diag_field('particles', 'mass_on_ocean', axes, Time, &
-     'Particle density field felt by ocean', 'kg/(m^2)')
-  grd%id_stored_ice=register_diag_field('particles', 'stored_ice', axes3d, Time, &
-     'Accumulated ice mass by class', 'kg')
-  grd%id_real_calving=register_diag_field('particles', 'real_calving', axes3d, Time, &
-     'Calving into particle class', 'kg/s')
-  grd%id_rmean_calving=register_diag_field('particles', 'running_mean_calving', axes, Time, &
-     'Running mean of calving', 'kg/s')
-  grd%id_rmean_calving_hflx=register_diag_field('particles', 'running_mean_calving_hflx', axes, Time, &
-     'Running mean of calving heat flux', 'J/s')
-  grd%id_uo=register_diag_field('particles', 'uo', axes, Time, &
-     'Ocean zonal component of velocity', 'm s^-1')
-  grd%id_vo=register_diag_field('particles', 'vo', axes, Time, &
-     'Ocean meridional component of velocity', 'm s^-1')
-  grd%id_ui=register_diag_field('particles', 'ui', axes, Time, &
-     'Ice zonal component of velocity', 'm s^-1')
-  grd%id_vi=register_diag_field('particles', 'vi', axes, Time, &
-     'Ice meridional component of velocity', 'm s^-1')
-  grd%id_ua=register_diag_field('particles', 'ua', axes, Time, &
-     'Atmos zonal component of velocity', 'm s^-1')
-  grd%id_va=register_diag_field('particles', 'va', axes, Time, &
-     'Atmos meridional component of velocity', 'm s^-1')
-  grd%id_sst=register_diag_field('particles', 'sst', axes, Time, &
-     'Sea surface temperature', 'degrees_C')
-  grd%id_cn=register_diag_field('particles', 'cn', axes, Time, &
-     'Sea ice concentration', '(fraction)')
-  grd%id_hi=register_diag_field('particles', 'hi', axes, Time, &
-     'Sea ice thickness', 'm')
-  grd%id_ssh=register_diag_field('particles', 'ssh', axes, Time, &
-     'Sea surface hieght', 'm')
-  grd%id_fax=register_diag_field('particles', 'taux', axes, Time, &
-     'X-stress on ice from atmosphere', 'N m^-2')
-  grd%id_fay=register_diag_field('particles', 'tauy', axes, Time, &
-     'Y-stress on ice from atmosphere', 'N m^-2')
-
-  ! Static fields
-  id_class=register_static_field('particles', 'lon', axes, &
-               'longitude (corners)', 'degrees_E')
-  if (id_class>0) lerr=send_data(id_class, grd%lon(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('particles', 'lat', axes, &
-               'latitude (corners)', 'degrees_N')
-  if (id_class>0) lerr=send_data(id_class, grd%lat(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('particles', 'area', axes, &
-               'cell area', 'm^2')
-  if (id_class>0) lerr=send_data(id_class, grd%area(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('particles', 'mask', axes, &
-               'wet point mask', 'none')
-  if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('particles', 'ocean_depth', axes, &
-               'ocean depth', 'm')
-  if (id_class>0) lerr=send_data(id_class, grd%ocean_depth(grd%isc:grd%iec,grd%jsc:grd%jec))
-
-  if (debug) then
-    call grd_chksum2(grd, grd%lon, 'init lon')
-    call grd_chksum2(grd, grd%lat, 'init lat')
-    call grd_chksum2(grd, grd%lonc, 'init lonc')
-    call grd_chksum2(grd, grd%latc, 'init latc')
-    call grd_chksum2(grd, grd%area, 'init area')
-    call grd_chksum2(grd, grd%msk, 'init msk')
-    call grd_chksum2(grd, grd%cos, 'init cos')
-    call grd_chksum2(grd, grd%sin, 'init sin')
-    call grd_chksum2(grd, grd%ocean_depth, 'init ocean_depth')
-  endif
-
-  if (do_unit_tests) then
-   if (unitTests(parts)) call error_mesg('diamonds, particles_init', 'Unit tests failed!', FATAL)
-  endif
-
- !write(stderrunit,*) 'diamonds: done'
-  call mpp_clock_end(parts%clock_ini)
-  call mpp_clock_end(parts%clock)
-
-!print *, mpp_pe(), 'Alon: global', grd%isg, grd%ieg, grd%jsg, grd%jeg
-!print *, mpp_pe(), 'Alon: comp', grd%isc, grd%iec, grd%jsc, grd%jec
-!print *, mpp_pe(), 'Alon: data', grd%isd, grd%ied, grd%jsd, grd%jed
-
-end subroutine ice_parts_framework_init
+end subroutine particles_framework_init
 
 ! ##############################################################################
 
@@ -1179,23 +752,8 @@ end subroutine send_parts_to_other_pes
     buff%data(4,n)=traj%day
     buff%data(5,n)=traj%uvel
     buff%data(6,n)=traj%vvel
-    buff%data(7,n)=traj%mass
-    buff%data(8,n)=traj%mass_of_bits
-    buff%data(9,n)=traj%heat_density
-    buff%data(10,n)=traj%thickness
-    buff%data(11,n)=traj%width
-    buff%data(12,n)=traj%length
     buff%data(13,n)=traj%uo
     buff%data(14,n)=traj%vo
-    buff%data(15,n)=traj%ui
-    buff%data(16,n)=traj%vi
-    buff%data(17,n)=traj%ua
-    buff%data(18,n)=traj%va
-    buff%data(19,n)=traj%ssh_x
-    buff%data(20,n)=traj%ssh_y
-    buff%data(21,n)=traj%sst
-    buff%data(22,n)=traj%cn
-    buff%data(23,n)=traj%hi
     buff%data(24,n)=traj%axn !Alon
     buff%data(25,n)=traj%ayn !Alon
     buff%data(26,n)=traj%bxn !Alon
@@ -1225,32 +783,17 @@ end subroutine send_parts_to_other_pes
     traj%day=buff%data(4,n)
     traj%uvel=buff%data(5,n)
     traj%vvel=buff%data(6,n)
-    traj%mass=buff%data(7,n)
-    traj%mass_of_bits=buff%data(8,n)
-    traj%heat_density=buff%data(9,n)
-    traj%thickness=buff%data(10,n)
-    traj%width=buff%data(11,n)
-    traj%length=buff%data(12,n)
-    traj%uo=buff%data(13,n)
-    traj%vo=buff%data(14,n)
-    traj%ui=buff%data(15,n)
-    traj%vi=buff%data(16,n)
-    traj%ua=buff%data(17,n)
-    traj%va=buff%data(18,n)
-    traj%ssh_x=buff%data(19,n)
-    traj%ssh_y=buff%data(20,n)
-    traj%sst=buff%data(21,n)
-    traj%cn=buff%data(22,n)
-    traj%hi=buff%data(23,n)
-    traj%axn=buff%data(24,n) !Alon
-    traj%ayn=buff%data(25,n) !Alon
-    traj%bxn=buff%data(26,n) !Alon
-    traj%byn=buff%data(27,n) !Alon
-    traj%uvel_old=buff%data(28,n) !Alon
-    traj%vvel_old=buff%data(29,n) !Alon
-    traj%lon_old=buff%data(30,n) !Alon
-    traj%lat_old=buff%data(31,n) !Alon
-    traj%particle_num=nint(buff%data(32,n))
+    traj%uo=buff%data(7,n)
+    traj%vo=buff%data(8,n)
+    traj%axn=buff%data(9,n) !Alon
+    traj%ayn=buff%data(10,n) !Alon
+    traj%bxn=buff%data(11,n) !Alon
+    traj%byn=buff%data(12,n) !Alon
+    traj%uvel_old=buff%data(13,n) !Alon
+    traj%vvel_old=buff%data(14,n) !Alon
+    traj%lon_old=buff%data(15,n) !Alon
+    traj%lat_old=buff%data(16,n) !Alon
+    traj%particle_num=nint(buff%data(17,n))
 
     call append_posn(first, traj)
 
@@ -1660,23 +1203,8 @@ type(particle), pointer :: this
     posn%day=parts%current_yearday
     posn%uvel=this%uvel
     posn%vvel=this%vvel
-    posn%mass=this%mass
-    posn%mass_of_bits=this%mass_of_bits
-    posn%heat_density=this%heat_density
-    posn%thickness=this%thickness
-    posn%width=this%width
-    posn%length=this%length
     posn%uo=this%uo
     posn%vo=this%vo
-    posn%ui=this%ui
-    posn%vi=this%vi
-    posn%ua=this%ua
-    posn%va=this%va
-    posn%ssh_x=this%ssh_x
-    posn%ssh_y=this%ssh_y
-    posn%sst=this%sst
-    posn%cn=this%cn
-    posn%hi=this%hi
     posn%axn=this%axn
     posn%ayn=this%ayn
     posn%bxn=this%bxn
@@ -1685,6 +1213,7 @@ type(particle), pointer :: this
     posn%vvel_old=this%vvel_old
     posn%lon_old=this%lon_old
     posn%lat_old=this%lat_old
+    posn%particle_num=this%particle_num
 
     call push_posn(this%trajectory, posn)
 
@@ -1752,13 +1281,11 @@ type(xyt) :: vals
   vals%year=part%start_year
   vals%particle_num=part%particle_num
   vals%day=part%start_day
-  vals%mass=part%start_mass
   call push_posn(part%trajectory, vals)
   vals%lon=0.
   vals%lat=99.
   vals%year=0
   vals%day=0.
-  vals%mass=part%mass_scaling
   call push_posn(part%trajectory, vals)
 
   ! Find end of part trajectory and point it to start of existing trajectories
@@ -2523,34 +2050,7 @@ character(len=*) :: label
   ! external forcing
   call grd_chksum2(grd, grd%uo, 'uo')
   call grd_chksum2(grd, grd%vo, 'vo')
-  call grd_chksum2(grd, grd%ua, 'ua')
-  call grd_chksum2(grd, grd%va, 'va')
-  call grd_chksum2(grd, grd%ui, 'ui')
-  call grd_chksum2(grd, grd%vi, 'vi')
-  call grd_chksum2(grd, grd%ssh, 'ssh')
-  call grd_chksum2(grd, grd%sst, 'sst')
-  call grd_chksum2(grd, grd%hi, 'hi')
-  call grd_chksum2(grd, grd%cn, 'cn')
-  call grd_chksum2(grd, grd%calving, 'calving')
-  call grd_chksum2(grd, grd%calving_hflx, 'calving_hflx')
-
-  ! state
-  call grd_chksum2(grd, grd%mass, 'mass')
-  call grd_chksum3(grd, grd%mass_on_ocean, 'mass_on_ocean')
-  call grd_chksum3(grd, grd%stored_ice, 'stored_ice')
-  call grd_chksum2(grd, grd%rmean_calving, 'rmean_calving')
-  call grd_chksum2(grd, grd%rmean_calving_hflx, 'rmean_calving_hflx')
-  call grd_chksum2(grd, grd%stored_heat, 'stored_heat')
-  call grd_chksum2(grd, grd%melt_buoy, 'melt_b')
-  call grd_chksum2(grd, grd%melt_eros, 'melt_e')
-  call grd_chksum2(grd, grd%melt_conv, 'melt_v')
-  call grd_chksum2(grd, grd%party_src, 'party_src')
-  call grd_chksum2(grd, grd%party_melt, 'party_melt')
-  call grd_chksum2(grd, grd%party_mass, 'party_mass')
-  call grd_chksum2(grd, grd%virtual_area, 'varea')
-  call grd_chksum2(grd, grd%floating_melt, 'floating_melt')
-  call grd_chksum2(grd, grd%part_melt, 'part_melt')
-
+  
   ! static
   call grd_chksum2(grd, grd%lon, 'lon')
   call grd_chksum2(grd, grd%lat, 'lat')

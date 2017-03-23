@@ -1,5 +1,7 @@
 module particles_mod
 
+use constants_mod, only: radius, pi, omega, HLF
+
 use fms_mod, only: field_exist, get_global_att_value
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
 use fms_mod, only: write_version_number, read_data, write_data, file_exist
@@ -21,7 +23,7 @@ use diag_manager_mod, only: diag_axis_init
 
 use particles_framework, only: particles_framework_init
 use particles_framework, only: particles_gridded, xyt, particle, particles, buffer
-use particles_framework, only: verbose, really_debug,debug,budget
+use particles_framework, only: verbose, really_debug,debug
 use particles_framework, only: find_cell,find_cell_by_search,count_parts,is_point_in_cell,pos_within_cell
 use particles_framework, only: nclasses
 use particles_framework, only: bilin,yearday,count_parts,parts_chksum
@@ -32,13 +34,13 @@ use particles_framework, only: add_new_part_to_list,delete_particle_from_list,de
 use particles_framework, only: grd_chksum2,grd_chksum3
 use particles_framework, only: offset_part_dates
 
-
 use particles_io,        only: particles_io_init,write_restart,write_trajectory
-use particles_io,        only: read_restart_parts,read_restart_parts_orig,read_restart_calving
+!use particles_io,        only: read_restart_parts,read_restart_parts_orig,read_restart_calving
 
 implicit none ; private
 
-public particles_init, particles_end, particles_run, particles_stock_pe, particles
+!public particles_init, particles_end, particles_run, particles_stock_pe, particles
+public particles_end, particles_run, particles
 public particles_save_restart
 
 
@@ -53,8 +55,11 @@ contains
 ! ##############################################################################
 subroutine particles_init(parts, &
              gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
-             dt, Time, lon, lat, wet, dx, dy, &
+             dt, Time, lon, lat, wet, dx, dy,area, &
              cos_rot, sin_rot, ocean_depth)
+
+ use particles_io, only: read_restart_parts
+
 ! Arguments
  type(particles), pointer :: parts
  integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
@@ -62,7 +67,7 @@ subroutine particles_init(parts, &
  real, intent(in) :: dt
  type (time_type), intent(in) :: Time ! current time
  real, dimension(:,:), intent(in) :: lon, lat, wet
- real, dimension(:,:), intent(in) :: dx, dy
+ real, dimension(:,:), intent(in) :: dx, dy, area
  real, dimension(:,:), intent(in) :: cos_rot, sin_rot
  real, dimension(:,:), intent(in), optional :: ocean_depth
 
@@ -81,7 +86,7 @@ subroutine particles_init(parts, &
 
  call mpp_clock_begin(parts%clock_ior)
  call particles_io_init(parts,io_layout)
- call read_restart_particles(parts,Time)
+ call read_restart_parts(parts,Time)
  call parts_chksum(parts, 'read_restart_particles')
  call mpp_clock_end(parts%clock_ior)
 
@@ -133,7 +138,27 @@ contains
 
 end subroutine interp_flds
 
+!######################################################################################
 
+subroutine accel(parts, part, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, debug_flag) !Saving  acceleration for Verlet, Adding Verlet flag - Alon  MP1
+!subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag) !old version commmented out by Alon
+! Arguments
+type(particles), pointer :: parts
+type(particle), pointer :: part
+integer, intent(in) :: i, j
+real, intent(in) :: xi, yj, lat, uvel, vvel, uvel0, vvel0, dt
+real, intent(inout) :: ax, ay
+real, intent(inout) :: axn, ayn, bxn, byn ! Added implicit and explicit accelerations to output -Alon
+logical, optional :: debug_flag
+
+ax=0
+ay=0
+axn=0
+ayn=0
+bxn=0
+byn=0
+
+end subroutine accel
 ! ##############################################################################
 
 subroutine particles_run(parts, time, uo, vo, stagger)
@@ -156,8 +181,8 @@ subroutine particles_run(parts, time, uo, vo, stagger)
   ! Get the stderr unit number
   stderrunit = stderr()
 
-  call mpp_clock_begin(bergs%clock)
-  call mpp_clock_begin(bergs%clock_int)
+  call mpp_clock_begin(parts%clock)
+  call mpp_clock_begin(parts%clock_int)
 
   vel_stagger = CGRID_NE ; if (present(stagger)) vel_stagger = stagger
 
@@ -186,7 +211,7 @@ subroutine particles_run(parts, time, uo, vo, stagger)
 
 
   if (vel_stagger == BGRID_NE) then
-    ! Copy ocean and ice velocities. They are already on B-grid u-points.
+    ! Copy ocean velocities. They are already on B-grid u-points.
     grd%uo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = uo(:,:)
     grd%vo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = vo(:,:)
     call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
@@ -197,7 +222,7 @@ subroutine particles_run(parts, time, uo, vo, stagger)
     iv_off = (size(vo,1) - (grd%iec - grd%isc))/2 - grd%isc + 1
     Jv_off = (size(vo,2) - (grd%jec - grd%jsc))/2 - grd%jsc + 1
     do I=grd%isc-1,grd%iec ; do J=grd%jsc-1,grd%jec
-      ! Interpolate ocean and ice velocities from C-grid velocity points.
+      ! Interpolate ocean velocities from C-grid velocity points.
       Iu = i + Iu_off ; ju = j + ju_off ; iv = i + iv_off ; Jv = j + Jv_off
       ! This masking is needed for now to prevent particles from running up on to land.
       mask = min(grd%msk(i,j), grd%msk(i+1,j), grd%msk(i,j+1), grd%msk(i+1,j+1))
@@ -238,10 +263,10 @@ subroutine particles_run(parts, time, uo, vo, stagger)
   endif
 
   ! Gridded diagnostics
-  if (grd%id_uo>0) &
-    lerr=send_data(grd%id_uo, grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_vo>0) &
-    lerr=send_data(grd%id_vo, grd%vo(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  !if (grd%id_uo>0) &
+  !  lerr=send_data(grd%id_uo, grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  !if (grd%id_vo>0) &
+  !  lerr=send_data(grd%id_vo, grd%vo(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
 
   ! Dump particles to screen
   if (really_debug) call print_parts(stderrunit,parts,'particles_run, status')
@@ -263,6 +288,8 @@ end subroutine particles_run
 ! ##############################################################################
 
 subroutine evolve_particles(parts)
+  use particles_framework, only: pi_180
+   
   ! Arguments
   type(particles), pointer :: parts
   ! Local variables
@@ -391,10 +418,10 @@ subroutine evolve_particles(parts)
     if (debug .and. .not. is_point_in_cell(parts%grd, lon2, lat2, i, j)) error_flag=.true.
   endif
   if (error_flag) then
-   call print_fld(grd, grd%msk, 'msk')
-   call print_fld(grd, grd%ssh, 'ssh')
-   call print_fld(grd, grd%sst, 'sst')
-   call print_fld(grd, grd%hi, 'hi')
+   !call print_fld(grd, grd%msk, 'msk')
+   !call print_fld(grd, grd%ssh, 'ssh')
+   !call print_fld(grd, grd%sst, 'sst')
+   !call print_fld(grd, grd%hi, 'hi')
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: i1,i2,i=',i1,i2,i
@@ -444,10 +471,10 @@ subroutine evolve_particles(parts)
     if (debug .and. .not. is_point_in_cell(parts%grd, lon3, lat3, i, j)) error_flag=.true.
   endif
   if (error_flag) then
-   call print_fld(grd, grd%msk, 'msk')
-   call print_fld(grd, grd%ssh, 'ssh')
-   call print_fld(grd, grd%sst, 'sst')
-   call print_fld(grd, grd%hi, 'hi')
+   !call print_fld(grd, grd%msk, 'msk')
+   !call print_fld(grd, grd%ssh, 'ssh')
+   !call print_fld(grd, grd%sst, 'sst')
+   !call print_fld(grd, grd%hi, 'hi')
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: i1,i2,i3,i=',i1,i2,i3,i
@@ -499,10 +526,10 @@ subroutine evolve_particles(parts)
     if (debug .and. .not. is_point_in_cell(parts%grd, lon4, lat4, i, j)) error_flag=.true.
   endif
   if (error_flag) then
-   call print_fld(grd, grd%msk, 'msk')
-   call print_fld(grd, grd%ssh, 'ssh')
-   call print_fld(grd, grd%sst, 'sst')
-   call print_fld(grd, grd%hi, 'hi')
+   !call print_fld(grd, grd%msk, 'msk')
+   !call print_fld(grd, grd%ssh, 'ssh')
+   !call print_fld(grd, grd%sst, 'sst')
+   !call print_fld(grd, grd%hi, 'hi')
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: i1,i2,i3,i4,i=',i1,i2,i3,i4,i
@@ -571,10 +598,10 @@ subroutine evolve_particles(parts)
     if (.not. is_point_in_cell(parts%grd, lonn, latn, i, j)) error_flag=.true.
   endif
   if (error_flag) then
-   call print_fld(grd, grd%msk, 'msk')
-   call print_fld(grd, grd%ssh, 'ssh')
-   call print_fld(grd, grd%sst, 'sst')
-   call print_fld(grd, grd%hi, 'hi')
+   !call print_fld(grd, grd%msk, 'msk')
+   !call print_fld(grd, grd%ssh, 'ssh')
+   !call print_fld(grd, grd%sst, 'sst')
+   !call print_fld(grd, grd%hi, 'hi')
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: i1,i2,i3,i4,i=',i1,i2,i3,i4,i
@@ -710,10 +737,10 @@ subroutine evolve_particles(parts)
     if (.not. is_point_in_cell(parts%grd, lonn, latn, i, j)) error_flag=.true.
   endif
   if (error_flag) then
-   call print_fld(grd, grd%msk, 'msk')
-   call print_fld(grd, grd%ssh, 'ssh')
-   call print_fld(grd, grd%sst, 'sst')
-   call print_fld(grd, grd%hi, 'hi')
+   !call print_fld(grd, grd%msk, 'msk')
+   !call print_fld(grd, grd%ssh, 'ssh')
+   !call print_fld(grd, grd%sst, 'sst')
+   !call print_fld(grd, grd%hi, 'hi')
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_particle: i1,i2,i=',i1,i2,i
@@ -1127,7 +1154,7 @@ type(particle), pointer :: this, next
   deallocate(parts%grd%latc)
   deallocate(parts%grd%dx)
   deallocate(parts%grd%dy)
-  deallocate(parts%grd%area)
+  !deallocate(parts%grd%area)
   deallocate(parts%grd%msk)
   deallocate(parts%grd%cos)
   deallocate(parts%grd%sin)
