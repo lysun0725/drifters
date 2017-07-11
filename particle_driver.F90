@@ -20,6 +20,7 @@ PROGRAM particle_driver
   use time_manager_mod, only: time_type, set_time, set_date, JULIAN, NOLEAP, NO_CALENDAR, set_calendar_type
   use ensemble_manager_mod, only : get_ensemble_size, ensemble_manager_init, ensemble_pelist_setup
   use mpp_mod, only : set_current_pelist => mpp_set_current_pelist
+  use particles_mod, only : particles_init
 !  use particles_mod, only : particles_run, particles_save_restart
 !  use particles_io, only : read_restart_particles
 !  use particles_framework, only : particle, particles, particles_gridded
@@ -151,14 +152,8 @@ PROGRAM particle_driver
 
 !  node=>drifters
 
-  !call mpp_domains_init
+  call particles_init( node, Grid, Time)
 
-!  create particles framework
-!  call particles_framework_ini(filename,topname,parts)
-!  grd=>parts%grd
-
-  ! create drifters
-!  call read_restart_particles(pafilename,parts) ! Modify from: drifters_input.f90: drifters_input_new
 
 !  call particles_run(parts,time,grd%uo,grd%vo) ! Run the particles model
 

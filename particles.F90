@@ -53,10 +53,16 @@ public particles_save_restart
 contains
 
 ! ##############################################################################
-subroutine particles_init(parts, &
-             gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
-             dt, Time, lon, lat, wet, dx, dy,area, &
-             cos_rot, sin_rot, ocean_depth)
+subroutine particles_init(parts, Grid, Time)
+ type(particles), pointer :: parts
+ type(ocean_grid_type), pointer :: Grid
+ type(time_type) :: Time
+
+
+!subroutine particles_init(parts, &
+!             gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
+!             dt, Time, lon, lat, wet, dx, dy,area, &
+!             cos_rot, sin_rot, ocean_depth)
 
  use particles_io, only: read_restart_parts
 
@@ -79,18 +85,18 @@ subroutine particles_init(parts, &
  stdlogunit=stdlog()
  write(stdlogunit,*) "particles: "//trim(version)
 
- call particles_framework_init(parts, &
-             gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
-             dt, Time, lon, lat, wet, dx, dy, area, &
-             cos_rot, sin_rot, ocean_depth=ocean_depth)
+ !call particles_framework_init(parts, &
+ !            gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
+ !            dt, Time, lon, lat, wet, dx, dy, area, &
+ !            cos_rot, sin_rot, ocean_depth=ocean_depth)
 
- call mpp_clock_begin(parts%clock_ior)
- call particles_io_init(parts,io_layout)
- call read_restart_parts(parts,Time)
- call parts_chksum(parts, 'read_restart_particles')
- call mpp_clock_end(parts%clock_ior)
+! call mpp_clock_begin(parts%clock_ior)
+! call particles_io_init(parts,io_layout)
+! call read_restart_parts(parts,Time)
+! call parts_chksum(parts, 'read_restart_particles')
+! call mpp_clock_end(parts%clock_ior)
 
- if (really_debug) call print_parts(stderrunit,parts,'particles_init, initial status')
+! if (really_debug) call print_parts(stderrunit,parts,'particles_init, initial status')
 
 
 end subroutine particles_init
