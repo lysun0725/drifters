@@ -54,12 +54,15 @@ public particles_save_restart
 contains
 
 ! ##############################################################################
-subroutine particles_init(parts, Grid, Time)
+subroutine particles_init(parts, Grid, Time, dt, axes)
+
  use particles_io, only: read_restart_parts
  
  type(particles), pointer :: parts
- type(ocean_grid_type), pointer :: Grid
- type(time_type) :: Time
+ type(ocean_grid_type), pointer :: Grid !< Grid type from parent model
+ type(time_type), intent(in) :: Time !< Time type from parent model
+ real, intent(in)            :: dt !< particle timestep in seconds
+ integer, dimension(2), intent(in) :: axes !< diagnostic axis ids
 
 
 !subroutine particles_init(parts, &
@@ -81,16 +84,21 @@ subroutine particles_init(parts, Grid, Time)
 
  
  integer :: stdlogunit, stderrunit
+ integer :: gni, gnj ! Global extent of ocean grid
 
   ! Get the stderr and stdlog unit numbers
  stderrunit=stderr()
  stdlogunit=stdlog()
  write(stdlogunit,*) "particles: "//trim(version)
 
- !call particles_framework_init(parts, &
- !            gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
- !            dt, Time, lon, lat, wet, dx, dy, area, &
- !            cos_rot, sin_rot, ocean_depth=ocean_depth)
+gni = Grid%ieg - Grid%isg + 1
+gnj = Grid%jeg - Grid%jsg + 1
+
+ call particles_framework_init(parts, &
+             gni, gnj, Grid%Domain%layout, Grid%Domain%io_layout, axes, Grid%Domain%dom_x_flags, Grid%Domain%dom_y_flags, &
+             dt, Time, Grid%geolonT, Grid%geolatT, Grid%mask2dT, Grid%dxT, Grid%dyT, Grid%areaT, &
+             Grid%cos_rot, Grid%sin_rot, ocean_depth=Grid%bathyT)
+
 
 ! call mpp_clock_begin(parts%clock_ior)
 ! call particles_io_init(parts,io_layout)

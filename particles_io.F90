@@ -353,8 +353,6 @@ real, allocatable,dimension(:) :: lon,	&
                                   lat,	&
                                   depth, &
                                   id	
-!real, allocatable, dimension(:) :: ine,	&
-!                                   jne
 
   ! Get the stderr unit number
   stderrunit=stderr()
@@ -383,19 +381,19 @@ real, allocatable,dimension(:) :: lon,	&
   end if ! found_restart ln 569
 
   ! Find approx outer bounds for tile
-  !lon0=minval( Grid%lon(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
-  !lon1=maxval( Grid%lon(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
-  !lat0=minval( Grid%lat(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
-  !lat1=maxval( Grid%lat(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
+  lon0=minval( Grid%geolonT(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
+  lon1=maxval( Grid%geolonT(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
+  lat0=minval( Grid%geolatT(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
+  lat1=maxval( Grid%geolatT(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
 
   do k=1, nparts_in_file
     localpart%lon=lon(k)
     localpart%lat=lat(k)
 
     if (use_slow_find) then
-      !lres=find_cell(Grid, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
+      lres=find_cell(Grid, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
     else
-      !lres=find_cell_by_search(Grid, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
+      lres=find_cell_by_search(Grid, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
     endif
 
     if (really_debug) then
