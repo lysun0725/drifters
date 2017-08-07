@@ -1,7 +1,7 @@
 PROGRAM particle_driver
 
   use MOM_file_parser, only : get_param, log_param, param_file_type
-  use MOM_get_input, only : get_MOM_input, directories
+  use MOM_get_input, only : Get_MOM_Input, directories
   use MOM_domains, only : MOM_domains_init, MOM_infra_init, clone_MOM_domain, create_group_pass
   use MOM_grid, only : ocean_grid_type, MOM_grid_init
   use MOM_io, only : slasher, MOM_io_init, ASCII_FILE, READONLY_FILE
@@ -23,7 +23,7 @@ PROGRAM particle_driver
   use particles_mod, only : particles_init
 !  use particles_mod, only : particles_run, particles_save_restart
 !  use particles_io, only : read_restart_particles
-!  use particles_framework, only : particle, particles, particles_gridded
+  use particles_framework, only : particle, particles !, particles_gridded
 !  use particles_extra, only : particles_framework_ini, read_restart_particles
 
   implicit none
@@ -34,9 +34,9 @@ PROGRAM particle_driver
   type(MOM_control_struct), pointer, dimension(:) :: CSp !<pointer of ensemble list of MOM control structures
   type(MOM_control_struct), pointer :: CS=> NULL() !<pointer to an element in CSp
   type(hor_index_type)   :: HI ! A hor_index_type for array extents
-!  type(particles), target  :: drifters
-!  type(particles), pointer :: node=>NULL() !<pointer to an element in drifters list
-!  type(particles_gridded),pointer :: grd
+  type(particles), target  :: drifters
+  type(particles), pointer :: node=>NULL() !<pointer to an element in drifters list
+  type(ocean_grid_type),  pointer :: grd
   type(time_type) :: time, time_start, time_start_segment, time_end, time_in
   real :: time_step
   character(len=128) :: history_file
@@ -79,7 +79,7 @@ PROGRAM particle_driver
 
   ierr = check_nml_error(io_status,'particle_driver_nml')
 
-  call get_MOM_input(PF,dirs)
+  call Get_MOM_Input(PF,dirs)
 
   if (file_exists(trim(dirs%restart_input_dir)//'ocean.res')) then
     call open_file(unit,trim(dirs%restart_input_dir)//'ocean.res',form=ASCII_FILE)
@@ -150,9 +150,9 @@ PROGRAM particle_driver
   call create_group_pass(CS%pass_uv_T_S_h, CS%u, CS%v, Grid%Domain)
 
 
-!  node=>drifters
-
-  call particles_init( node, Grid, Time)
+  node=>drifters
+  grd=>Grid
+  call particles_init( node, grd, Time)
 
 
 !  call particles_run(parts,time,grd%uo,grd%vo) ! Run the particles model

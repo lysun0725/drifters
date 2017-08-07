@@ -22,6 +22,8 @@ use fms_mod,    only : clock_flag_default
 
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
+use MOM_grid, only : ocean_grid_type
+
 use particles_framework, only: particles_gridded, xyt, particle, particles, buffer
 use particles_framework, only: pack_part_into_buffer2,unpack_part_from_buffer2
 use particles_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
@@ -329,24 +331,87 @@ end subroutine write_restart
 
 ! ##############################################################################
 
-subroutine read_restart_parts(parts,Time)
+subroutine read_restart_parts(parts,Grid,Time)
 ! Arguments
 type(particles), pointer :: parts
+type(ocean_grid_type), pointer :: Grid
 type(time_type), intent(in) :: Time
-! Local variables
-integer, dimension(:), allocatable :: found_restart_int
-integer :: k, ierr, ncid, dimid, nbergs_in_file
-integer :: lonid, latid,  uvelid, vvelid, ineid, jneid
-integer :: axnid, aynid, uvel_oldid, vvel_oldid, bxnid, bynid, lon_oldid, lat_oldid !Added by Alon
-integer :: massid, thicknessid, widthid, lengthid
-integer :: start_lonid, start_latid, start_yearid, iceberg_numid, start_dayid, start_massid
-integer :: scaling_id, mass_of_bits_id, heat_density_id
-logical :: lres, found_restart, multiPErestart
+
+!Local variables
+integer :: k, siz(4), nparts_in_file, nparts_read
+logical :: lres, found_restart, found!, replace_particle_num
+logical :: explain
+logical :: multiPErestart  ! Not needed with new restart read; currently kept for compatibility
 real :: lon0, lon1, lat0, lat1
+real :: pos_is_good, pos_is_good_all_pe
 character(len=33) :: filename, filename_base
-type(particles_gridded), pointer :: grd
-type(particle) :: localberg ! NOT a pointer but an actual local variable
-integer :: stderrunit, iNg, jNg, i, j
+
+type(particle) :: localpart
+integer :: stderrunit, i, j, cnt, ij
+
+real, allocatable,dimension(:) :: lon,	&
+                                  lat,	&
+                                  depth, &
+                                  id	
+!real, allocatable, dimension(:) :: ine,	&
+!                                   jne
+
+  ! Get the stderr unit number
+  stderrunit=stderr()
+
+  ! Zero out nbergs_in_file
+  nparts_in_file = 0
+
+  filename_base=trim(restart_input_dir)//'drifters.res.nc'
+
+  found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
+
+  if (found_restart) then
+    filename = filename_base
+    call get_field_size(filename,'i',siz, field_found=found, domain=Grid%Domain%mpp_domain) !Modify later: get_field_size has type(domain2D), but Grid%domain is type(MOM_domain_type)
+    nparts_in_file = 4 !siz(1)
+
+    allocate(lon(nparts_in_file))
+    allocate(lat(nparts_in_file))
+    allocate(depth(nparts_in_file))
+    allocate(id(nparts_in_file))
+
+    call read_unlimited_axis(filename,'lon',lon,domain=Grid%Domain%mpp_domain)
+    call read_unlimited_axis(filename,'lat',lat,domain=Grid%Domain%mpp_domain)
+    call read_unlimited_axis(filename,'depth',depth,domain=Grid%Domain%mpp_domain)
+    call read_unlimited_axis(filename,'id',id,domain=Grid%Domain%mpp_domain)
+  end if ! found_restart ln 569
+
+  ! Find approx outer bounds for tile
+  !lon0=minval( Grid%lon(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
+  !lon1=maxval( Grid%lon(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
+  !lat0=minval( Grid%lat(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
+  !lat1=maxval( Grid%lat(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
+
+  do k=1, nparts_in_file
+    localpart%lon=lon(k)
+    localpart%lat=lat(k)
+
+    if (use_slow_find) then
+      !lres=find_cell(Grid, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
+    else
+      !lres=find_cell_by_search(Grid, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
+    endif
+
+    if (really_debug) then
+      write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'diamonds, read_restart_part: part ',k,' is at ',localpart%lon,localpart%lat,&
+           & ' on PE ',mpp_pe()
+      write(stderrunit,*) 'diamonds, read_restart_bergs: lres = ',lres
+    endif
+  end do ! ln 650
+
+  if (found_restart) then
+    deallocate(lon,          &
+               lat,          &
+               depth,        &
+               id )
+  end if
+
 
 end subroutine read_restart_parts
 

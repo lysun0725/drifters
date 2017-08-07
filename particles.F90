@@ -1,6 +1,7 @@
 module particles_mod
 
 use constants_mod, only: radius, pi, omega, HLF
+use MOM_grid, only : ocean_grid_type
 
 use fms_mod, only: field_exist, get_global_att_value
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
@@ -39,7 +40,7 @@ use particles_io,        only: particles_io_init,write_restart,write_trajectory
 
 implicit none ; private
 
-!public particles_init, particles_end, particles_run, particles_stock_pe, particles
+public particles_init !, particles_end, particles_run, particles_stock_pe, particles
 public particles_end, particles_run, particles
 public particles_save_restart
 
@@ -54,6 +55,8 @@ contains
 
 ! ##############################################################################
 subroutine particles_init(parts, Grid, Time)
+ use particles_io, only: read_restart_parts
+ 
  type(particles), pointer :: parts
  type(ocean_grid_type), pointer :: Grid
  type(time_type) :: Time
@@ -64,18 +67,17 @@ subroutine particles_init(parts, Grid, Time)
 !             dt, Time, lon, lat, wet, dx, dy,area, &
 !             cos_rot, sin_rot, ocean_depth)
 
- use particles_io, only: read_restart_parts
 
 ! Arguments
- type(particles), pointer :: parts
- integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
- integer, intent(in) :: dom_x_flags, dom_y_flags
- real, intent(in) :: dt
- type (time_type), intent(in) :: Time ! current time
- real, dimension(:,:), intent(in) :: lon, lat, wet
- real, dimension(:,:), intent(in) :: dx, dy, area
- real, dimension(:,:), intent(in) :: cos_rot, sin_rot
- real, dimension(:,:), intent(in), optional :: ocean_depth
+! type(particles), pointer :: parts
+! integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
+! integer, intent(in) :: dom_x_flags, dom_y_flags
+! real, intent(in) :: dt
+! type (time_type), intent(in) :: Time ! current time
+! real, dimension(:,:), intent(in) :: lon, lat, wet
+! real, dimension(:,:), intent(in) :: dx, dy, area
+! real, dimension(:,:), intent(in) :: cos_rot, sin_rot
+! real, dimension(:,:), intent(in), optional :: ocean_depth
 
  
  integer :: stdlogunit, stderrunit
@@ -92,7 +94,7 @@ subroutine particles_init(parts, Grid, Time)
 
 ! call mpp_clock_begin(parts%clock_ior)
 ! call particles_io_init(parts,io_layout)
-! call read_restart_parts(parts,Time)
+ call read_restart_parts(parts,Grid,Time)
 ! call parts_chksum(parts, 'read_restart_particles')
 ! call mpp_clock_end(parts%clock_ior)
 
