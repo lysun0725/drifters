@@ -4,7 +4,7 @@ PROGRAM particle_driver
   use MOM_get_input, only : Get_MOM_Input, directories
   use MOM_domains, only : MOM_domains_init, MOM_infra_init, clone_MOM_domain, create_group_pass
   use MOM_grid, only : ocean_grid_type, MOM_grid_init
-  use MOM_io, only : slasher, MOM_io_init, ASCII_FILE, READONLY_FILE
+  use MOM_io, only : slasher, MOM_io_init, ASCII_FILE, READONLY_FILE, vardesc, var_desc
   use MOM_io, only : check_nml_error, file_exists, open_file, close_file, io_infra_init
   use MOM_error_handler, only : FATAL, WARNING, MOM_error
   use MOM_hor_index, only : hor_index_type, hor_index_init
@@ -14,9 +14,9 @@ PROGRAM particle_driver
   use MOM_coord_initialization, only : MOM_initialize_coord
   use MOM_transcribe_grid,       only : copy_dyngrid_to_MOM_grid, copy_MOM_grid_to_dyngrid
   use MOM_dyn_horgrid, only : dyn_horgrid_type, create_dyn_horgrid, destroy_dyn_horgrid
-  use MOM_verticalGrid, only : verticalGrid_type, verticalGridInit
+  use MOM_verticalGrid, only : verticalGrid_type, verticalGridInit, get_thickness_units
   use MOM, only : MOM_control_struct
-  use MOM_state_initialization, only : MOM_initialize_state
+  use MOM_restart, only : restore_state, restart_init, register_restart_field, restart_end
   use MOM_diag_mediator, only : diag_mediator_infrastructure_init
   use time_manager_mod, only: time_type, set_time, set_date, JULIAN, NOLEAP, NO_CALENDAR, set_calendar_type
   use ensemble_manager_mod, only : get_ensemble_size, ensemble_manager_init, ensemble_pelist_setup
@@ -43,9 +43,11 @@ PROGRAM particle_driver
   character(len=128) :: history_file
   character(len=32)  :: topo_file
   character(len=32)  :: drifter_file
+  character(len=48)  :: thickness_units
   character(len=8)  :: mod = 'MOM'
   type(param_file_type) :: PF
   type(directories) :: dirs
+  type(vardesc) :: vd
   !<ens_info(1)=ensemble_size; ens_info(2)=tot_pes
   !<ens_info(3)=ocn_pes;ens_info(4)=atm_pes
   !<ens_info(5)=land_pes;ens_info(6)=ice_pes
@@ -86,8 +88,8 @@ PROGRAM particle_driver
 
   call Get_MOM_Input(PF,dirs)
 
-  if (file_exists(trim(dirs%restart_input_dir)//'ocean.res')) then
-    call open_file(unit,trim(dirs%restart_input_dir)//'ocean.res',form=ASCII_FILE)
+  if (file_exists(trim(dirs%restart_input_dir)//'ocean_solo.res')) then
+    call open_file(unit,trim(dirs%restart_input_dir)//'ocean_solo.res',form=ASCII_FILE,action=READONLY_FILE)
     read(unit,*) calendar_type; read(unit,*) date_init; read(unit,*) date
     call close_file(unit)
   endif
@@ -118,46 +120,60 @@ PROGRAM particle_driver
   call hor_index_init(Grid%Domain, HI, PF, &
        local_indexing=.true.)
 
-  do n=1,nPEs_ocn
-    CS=>CSp(n)
-    call verticalGridInit( PF, CS%GV )
-  enddo
-
   call create_dyn_horgrid(dG,HI)
   call clone_MOM_domain(Grid%Domain, dG%Domain)
 
-  is   = dG%isc   ; ie   = dG%iec  ; js   = dG%jsc  ; je   = dG%jec ; nz = GV%ke
-  isd  = dG%isd   ; ied  = dG%ied  ; jsd  = dG%jsd  ; jed  = dG%jed
-  IsdB = dG%IsdB  ; IedB = dG%IedB ; JsdB = dG%JsdB ; JedB = dG%JedB
 
   do n=1,nPEs_ocn
     CS=>CSp(n)
+    call verticalGridInit( PF, CS%GV )
+!    call MOM_timing_init(CS)
+!    call tracer_registry_init(PF,CS%tracer_Reg)
+    call MOM_initialize_fixed(dG,CS%OBC,PF,.false.,dirs%output_directory)
+    call MOM_initialize_coord(CS%GV, PF, .false., &
+       dirs%output_directory, CS%tv, dG%max_depth)
+  enddo
+
+  is   = dG%isc   ; ie   = dG%iec  ; js   = dG%jsc  ; je   = dG%jec ; nz = CS%GV%ke
+  isd  = dG%isd   ; ied  = dG%ied  ; jsd  = dG%jsd  ; jed  = dG%jed
+  IsdB = dG%IsdB  ; IedB = dG%IedB ; JsdB = dG%JsdB ; JedB = dG%JedB
+
+  call MOM_grid_init(Grid, PF, HI)
+  call copy_dyngrid_to_MOM_grid(dG, Grid)
+
+  thickness_units = get_thickness_units(GV)
+
+  do n=1,nPEs_ocn
+    CS=>CSp(n)
+    CS%GV=>GV
     ! Allocate and initialize space for primary MOM variables.
     allocate(CS%u(IsdB:IedB,jsd:jed,nz))   ; CS%u(:,:,:) = 0.0
     allocate(CS%v(isd:ied,JsdB:JedB,nz))   ; CS%v(:,:,:) = 0.0
     allocate(CS%h(isd:ied,jsd:jed,nz))     ; CS%h(:,:,:) = GV%Angstrom
-  enddo
 
-  call MOM_initialize_fixed(dG,CS%OBC,PF,.false.,dirs%output_directory)
-  call MOM_initialize_coord(CS%GV, PF, .false., &
-       dirs%output_directory, CS%tv, dG%max_depth)
+    call restart_init(PF,CS%restart_CSp)
+    vd = var_desc("h",thickness_units,"Layer Thickness")
+    call register_restart_field(CS%h, vd, .true., CS%restart_CSp)
+    vd = var_desc("u","meter second-1","Zonal velocity",'u','L')
+    call register_restart_field(CS%u, vd, .true., CS%restart_CSp)
+    vd = var_desc("v","meter second-1","Meridional velocity",'v','L')
+    call register_restart_field(CS%v, vd, .true., CS%restart_CSp)
+
+
+    call restore_state(dirs%input_filename, dirs%restart_input_dir, Time, Grid,CS%restart_CSp)
 
   !   Shift from using the temporary dynamic grid type to using the final
   ! (potentially static) ocean-specific grid type.
   !   The next line would be needed if G%Domain had not already been init'd above:
   !     call clone_MOM_domain(dG%Domain, G%Domain)
-  call MOM_grid_init(Grid, PF, HI)
-  call copy_dyngrid_to_MOM_grid(dG, Grid)
+
+
+
+    call create_group_pass(CS%pass_uv_T_S_h, CS%u, CS%v, Grid%Domain)
+
+  enddo
+
   call destroy_dyn_horgrid(dG)
-
-
-  call MOM_initialize_state(CS%u, CS%v, CS%h, CS%tv, Time, Grid, CS%GV, PF, &
-                            dirs, CS%restart_CSp, CS%ALE_CSp, CS%tracer_Reg, &
-                            CS%sponge_CSp, CS%ALE_sponge_CSp, CS%OBC, Time_in)
-
-  call create_group_pass(CS%pass_uv_T_S_h, CS%u, CS%v, Grid%Domain)
-
-
   node=>drifters
   grd=>Grid
   call particles_init( node, grd, Time, dt, axes)
