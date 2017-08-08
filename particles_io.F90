@@ -203,7 +203,7 @@ real, allocatable,dimension(:) :: lon,	&
 
   if (found_restart) then
     filename = filename_base
-    call get_field_size(filename,'i',siz, field_found=found, domain=grd%domain) 
+    call get_field_size(filename,'lon',siz, field_found=found, domain=grd%domain) 
     nparts_in_file = siz(1)
     print *,'NPARTS= ',nparts_in_file
     allocate(lon(nparts_in_file))
