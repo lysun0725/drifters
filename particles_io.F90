@@ -204,8 +204,8 @@ real, allocatable,dimension(:) :: lon,	&
   if (found_restart) then
     filename = filename_base
     call get_field_size(filename,'i',siz, field_found=found, domain=grd%domain) 
-    nparts_in_file = 4 !siz(1)
-
+    nparts_in_file = siz(1)
+    print *,'NPARTS= ',nparts_in_file
     allocate(lon(nparts_in_file))
     allocate(lat(nparts_in_file))
     allocate(depth(nparts_in_file))

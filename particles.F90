@@ -617,87 +617,38 @@ end subroutine accel
 ! ##############################################################################
 
 !> The main driver the steps updates particles
-subroutine particles_run(parts, time, calving, uo, vo, ui, vi,tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
-                        stagger, stress_stagger, sss, mass_part, ustar_part, area_part)
+subroutine particles_run(parts, time, uo, vo, stagger)
   ! Arguments
   type(particles), pointer :: parts !< Container for all types and memory
   type(time_type), intent(in) :: time !< Model time
-  real, dimension(:,:), intent(inout) :: calving !< Calving (kg/s). This field is updated with melt by parts.
-  real, dimension(:,:), intent(inout) :: calving_hflx !< Calving heat flux (W/m2)
   real, dimension(:,:), intent(in) :: uo !< Ocean zonal velocity (m/s)
   real, dimension(:,:), intent(in) :: vo !< Ocean meridional velocity (m/s)
-  real, dimension(:,:), intent(in) :: ui !< Ice zonal velocity (m/s)
-  real, dimension(:,:), intent(in) :: vi !< Ice meridional velocity (m/s)
-  real, dimension(:,:), intent(in) :: tauxa !< Zonal wind stress (Pa)
-  real, dimension(:,:), intent(in) :: tauya !< Meridional wind stress (Pa)
-  real, dimension(:,:), intent(in) :: ssh !< Effective sea-surface height (m)
-  real, dimension(:,:), intent(in) :: sst !< Sea-surface temperature (C or K)
-  real, dimension(:,:), intent(in) :: cn !< Sea-ice concentration (nondim)
-  real, dimension(:,:), intent(in) :: hi !< Sea-ice thickness (m)
   integer, optional, intent(in) :: stagger
-  integer, optional, intent(in) :: stress_stagger
-  real, dimension(:,:), optional, intent(in) :: sss !< Sea-surface salinity (1e-3)
-  real, dimension(:,:), optional, pointer :: mass_part !< Mass of parts (kg)
-  real, dimension(:,:), optional, pointer :: ustar_part !< Friction velocity on base of parts (m/s)
-  real, dimension(:,:), optional, pointer :: area_part !< Area of parts (m2)
+
   ! Local variables
   integer :: iyr, imon, iday, ihr, imin, isec, k
   type(particles_gridded), pointer :: grd
-  logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality
-  real :: unused_calving, tmpsum, grdd_part_mass, grdd_party_mass,grdd_spread_mass, grdd_spread_area
-  real :: grdd_u_particle, grdd_v_particle, grdd_ustar_particle, grdd_spread_uvel, grdd_spread_vvel
+  logical :: lerr, sample_traj, write_traj, lverbose
+  real :: grdd_u_particle, grdd_v_particle
   integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
-  real :: mask, max_SST
+  real :: mask
   real, dimension(:,:), allocatable :: uC_tmp, vC_tmp, uA_tmp, vA_tmp
-  integer :: vel_stagger, str_stagger
+  integer :: vel_stagger
   real, dimension(:,:), allocatable :: iCount
-  integer :: nbonds
   integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
 
-  call mpp_clock_begin(parts%clock)
-  call mpp_clock_begin(parts%clock_int)
-
-  vel_stagger = BGRID_NE ; if (present(stagger)) vel_stagger = stagger
-  str_stagger = vel_stagger ; if (present(stress_stagger)) str_stagger = stress_stagger
+  vel_stagger = CGRID_NE ; if (present(stagger)) vel_stagger = stagger
 
   ! For convenience
   grd=>parts%grd
-
-  grd%floating_melt(:,:)=0.
-  grd%part_melt(:,:)=0.
-  grd%melt_buoy(:,:)=0.
-  grd%melt_eros(:,:)=0.
-  grd%melt_conv(:,:)=0.
-  grd%party_src(:,:)=0.
-  grd%party_melt(:,:)=0.
-  grd%party_mass(:,:)=0.
-  grd%spread_mass_old(:,:)=0.
-  grd%spread_mass(:,:)=0.  !Don't zero this out yet, because we can first use this an add it onto the SSH
-  grd%spread_area(:,:)=0.
   grd%u_particle(:,:)=0.
   grd%v_particle(:,:)=0.
-  grd%spread_uvel(:,:)=0.
-  grd%spread_vvel(:,:)=0.
-  grd%ustar_particle(:,:)=0.
-  grd%mass(:,:)=0.
-  grd%virtual_area(:,:)=0.
 
   !Initializing _on_ocean_fields
-  grd%mass_on_ocean(:,:,:)=0. ;   grd%area_on_ocean(:,:,:)=0.
   grd%Uvel_on_ocean(:,:,:)=0. ;   grd%Vvel_on_ocean(:,:,:)=0.
-
-  if (present(mass_part)) then ;  if (associated(mass_part)) then
-    mass_part(:,:)=0.0
-  endif ;  endif
-  if (present(ustar_part)) then ; if (associated(ustar_part)) then
-    ustar_part(:,:)=0.0
-  endif ;  endif
-  if (present(area_part)) then ;  if (associated(area_part)) then
-    area_part(:,:)=0.0
-  endif ;  endif
 
   ! Manage time
   call get_date(time, iyr, imon, iday, ihr, imin, isec)
@@ -718,57 +669,19 @@ subroutine particles_run(parts, time, calving, uo, vo, ui, vi,tauxa, tauya, ssh,
   if (parts%verbose_hrs>0) then
      if (mod(24*iday+ihr+(imin/60.),float(parts%verbose_hrs)).eq.0) lverbose=verbose
   endif
-  lbudget=.false.
-  if (parts%verbose_hrs>0) then
-     if (mod(24*iday+ihr+(imin/60.),float(parts%verbose_hrs)).eq.0) lbudget=budget  !Added minutes, so that it does not repeat when smaller time steps are used.
-  endif
+
   if (mpp_pe()==mpp_root_pe().and.lverbose) write(*,'(a,3i5,a,3i5,a,i5,f8.3)') &
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
        ' yr,yrdy=', parts%current_year, parts%current_yearday
 
 
  !call sanitize_field(grd%calving,1.e20)
-  tmpsum=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  parts%net_calving_received=parts%net_calving_received+tmpsum*parts%dt
-
-  ! Adapt calving heat flux from coupler
-  grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=calving_hflx(:,:) & ! Units of W/m2
-       *grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec)
-
-  ! Adapt calving flux from coupler for use here
-  grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:) & ! Units of kg/m2/s
-       *grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec)
-
-  ! Running means of calving and calving_hflx
-  !if (parts%tau_calving>0.) then
-  !  call get_running_mean_calving(parts, grd%calving, grd%calving_hflx)
-  !  calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) ! Copy back from grd%calving if using running-mean
-  !  calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
-  !endif
-
-  grd%calving(:,:)=grd%calving(:,:)*grd%msk(:,:)*grd%area(:,:) ! Convert to kg/s
-  tmpsum=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  parts%net_incoming_calving=parts%net_incoming_calving+tmpsum*parts%dt
-  if (grd%id_calving>0) &
-    lerr=send_data(grd%id_calving, grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-
-  grd%calving_hflx(:,:)=grd%calving_hflx(:,:)*grd%msk(:,:) ! Mask (just in case)
-  if (grd%id_calving_hflx_in>0) &
-    lerr=send_data(grd%id_calving_hflx_in, grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  tmpsum=sum( grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  parts%net_incoming_calving_heat=parts%net_incoming_calving_heat+tmpsum*parts%dt ! Units of J
-
-  if (grd%id_ocean_depth>0) &
-    lerr=send_data(grd%id_ocean_depth, grd%ocean_depth(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
 
   if (vel_stagger == BGRID_NE) then
     ! Copy ocean and ice velocities. They are already on B-grid u-points.
     grd%uo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = uo(:,:)
     grd%vo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = vo(:,:)
     call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
-    grd%ui(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = ui(:,:)
-    grd%vi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = vi(:,:)
-    call mpp_update_domains(grd%ui, grd%vi, grd%domain, gridtype=BGRID_NE)
   elseif (vel_stagger == CGRID_NE) then
     ! The u- and v- points will have different offsets with symmetric memory.
     Iu_off = (size(uo,1) - (grd%iec - grd%isc))/2 - grd%isc + 1
@@ -781,160 +694,27 @@ subroutine particles_run(parts, time, calving, uo, vo, ui, vi,tauxa, tauya, ssh,
       ! This masking is needed for now to prevent particles from running up on to land.
       mask = min(grd%msk(i,j), grd%msk(i+1,j), grd%msk(i,j+1), grd%msk(i+1,j+1))
       grd%uo(I,J) = mask * 0.5*(uo(Iu,ju)+uo(Iu,ju+1))
-      grd%ui(I,J) = mask * 0.5*(ui(Iu,ju)+ui(Iu,ju+1))
       grd%vo(I,J) = mask * 0.5*(vo(iv,Jv)+vo(iv+1,Jv))
-      grd%vi(I,J) = mask * 0.5*(vi(iv,Jv)+vi(iv+1,Jv))
     enddo ; enddo
   else
     call error_mesg('diamonds, particle_run', 'Unrecognized value of stagger!', FATAL)
   endif
 
-  if (str_stagger == BGRID_NE) then
-    ! Copy wind stress components on B-grid u-points.
-    grd%ua(grd%isc:grd%iec,grd%jsc:grd%jec) = tauxa(:,:)
-    grd%va(grd%isc:grd%iec,grd%jsc:grd%jec) = tauya(:,:)
-  elseif (str_stagger == CGRID_NE) then
-    ! The u- and v- points will have different offsets with symmetric memory.
-    Iu_off = (size(tauxa,1) - (grd%iec - grd%isc))/2 - grd%isc + 1
-    ju_off = (size(tauxa,2) - (grd%jec - grd%jsc))/2 - grd%jsc + 1
-    iv_off = (size(tauya,1) - (grd%iec - grd%isc))/2 - grd%isc + 1
-    Jv_off = (size(tauya,2) - (grd%jec - grd%jsc))/2 - grd%jsc + 1
-    allocate(uC_tmp(grd%isd:grd%ied,grd%jsd:grd%jed), &
-             vC_tmp(grd%isd:grd%ied,grd%jsd:grd%jed))
-    uC_tmp(:,:) = 0. ! This avoids uninitialized values that might remain in halo
-    vC_tmp(:,:) = 0. ! regions after the call to mpp_update_domains() below.
-    !   If the particle model used symmetric memory, the starting value of these
-    ! copies would need to be decremented by 1.
-    do i=grd%isc,grd%iec ; do j=grd%jsc,grd%jec
-      uC_tmp(i,j) = tauxa(i+Iu_off, j+ju_off)
-      vC_tmp(i,J) = tauya(i+iv_off, J+Jv_off)
-    enddo ; enddo
-
-    call mpp_update_domains(uC_tmp, vC_tmp, grd%domain, gridtype=CGRID_NE)
-    do I=grd%isc-1,grd%iec ; do J=grd%jsc-1,grd%jec
-      ! Interpolate wind stresses from C-grid velocity-points.
-      ! This masking is needed for now to prevent particles from running up on to land.
-      mask = min(grd%msk(i,j), grd%msk(i+1,j), grd%msk(i,j+1), grd%msk(i+1,j+1))
-       grd%ua(I,J) = mask * 0.5*(uC_tmp(I,j)+uC_tmp(I,j+1))
-       grd%va(I,J) = mask * 0.5*(vC_tmp(i,J)+vC_tmp(i+1,J))
-    enddo ; enddo
-    deallocate(uC_tmp, vC_tmp)
-  elseif (str_stagger == AGRID) then
-    ! Copy into arrays with local index conventions and halos.
-    allocate(uA_tmp(grd%isd:grd%ied,grd%jsd:grd%jed), &
-             vA_tmp(grd%isd:grd%ied,grd%jsd:grd%jed))
-    uA_tmp(:,:) = 0.0 ! This avoids uninitialized values that might remain in halo
-    vA_tmp(:,:) = 0.0 ! regions after the call to mpp_update_domains() below.
-    uA_tmp(grd%isc:grd%iec,grd%jsc:grd%jec) = tauxa(:,:)
-    vA_tmp(grd%isc:grd%iec,grd%jsc:grd%jec) = tauya(:,:)
-    call mpp_update_domains(uA_tmp, vA_tmp, grd%domain, gridtype=AGRID)
-    do I=grd%isc-1,grd%iec ; do J=grd%jsc-1,grd%jec
-      ! Interpolate wind stresses from A-grid tracer points to the corner B-grid points.
-      ! This masking is needed for now to prevent particles from running up on to land.
-      mask = min(grd%msk(i,j), grd%msk(i+1,j), grd%msk(i,j+1), grd%msk(i+1,j+1))
-      grd%ua(I,J) = mask * 0.25*((uA_tmp(i,j) + uA_tmp(i+1,j+1)) + &
-                                 (uA_tmp(i+1,j) + uA_tmp(i,j+1)))
-      grd%va(I,J) = mask * 0.25*((vA_tmp(i,j) + vA_tmp(i+1,j+1)) + &
-                                 (vA_tmp(i+1,j) + vA_tmp(i,j+1)))
-    enddo ; enddo
-
-    deallocate(uA_tmp, vA_tmp)
-  else
-    call error_mesg('diamonds, particle_run', 'Unrecognized value of stress_stagger!', FATAL)
-  endif
-
   call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
-  call mpp_update_domains(grd%ui, grd%vi, grd%domain, gridtype=BGRID_NE)
-
-  call invert_tau_for_du(grd%ua, grd%va) ! Note rough conversion from stress to speed
- !grd%ua(grd%isc:grd%iec,grd%jsc:grd%jec)=sign(sqrt(abs(tauxa(:,:))/0.01),tauxa(:,:))  ! Note rough conversion from stress to speed
- !grd%va(grd%isc:grd%iec,grd%jsc:grd%jec)=sign(sqrt(abs(tauya(:,:))/0.01),tauya(:,:))  ! Note rough conversion from stress to speed
-  call mpp_update_domains(grd%ua, grd%va, grd%domain, gridtype=BGRID_NE)
-
-  ! Copy sea surface height and temperature(resides on A grid)
-  grd%ssh(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=ssh(:,:)
-  if (parts%add_particle_thickness_to_SSH) then
-    !We might need to make sure spread_mass is defined on halos (or this might be done automatically. I need to look into this)
-    do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
-      if (grd%area(i,j)>0) then
-        grd%ssh(i,j) =   ((grd%spread_mass(i,j)/grd%area(i,j))*(parts%rho_parts/rho_seawater))  !Is this an appropriate sea water density to use? Should be freezing point.
-      endif
-    enddo ;enddo
-  endif
-
-  call mpp_update_domains(grd%ssh, grd%domain)
-  max_SST = maxval(sst(:,:))
-  if (max_SST > 120.0) then ! The input sst is in degrees Kelvin, otherwise the water would be boiling.
-    grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec) = sst(:,:)-273.15 ! Note convert from Kelvin to Celsius
-  else  ! The input sst is already in degrees Celsius.
-    grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec) = sst(:,:) ! Note no conversion necessary.
-  endif
-  call mpp_update_domains(grd%sst, grd%domain)
-  ! Copy sea-ice concentration and thickness (resides on A grid)
-  grd%cn(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=cn(:,:)
-  call mpp_update_domains(grd%cn, grd%domain)
-  grd%hi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=hi(:,:)
-  call mpp_update_domains(grd%hi, grd%domain)
-
-  ! Adding gridded salinity.
-  if (present(sss)) then
-    grd%sss(grd%isc:grd%iec,grd%jsc:grd%jec)=sss(:,:)
-  else
-    grd%sss(grd%isc:grd%iec,grd%jsc:grd%jec)=-1.0
-    if ((parts%use_mixed_layer_salinity_for_thermo) .and. (parts%melt_particles_as_ice_shelf))  then
-      call error_mesg('diamonds, particles_run', 'Can not use salinity for thermo. Ocean ML salinity not present!', FATAL)
-    endif
-  endif
 
   ! Make sure that gridded values agree with mask  (to get ride of NaN values)
   do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
     ! Initializing all gridded values to zero
     if (grd%msk(i,j).lt. 0.5) then
-      grd%ua(i,j) = 0.0 ;  grd%va(i,j) = 0.0
       grd%uo(i,j) = 0.0 ;  grd%vo(i,j) = 0.0
-      grd%ui(i,j) = 0.0 ;  grd%vi(i,j) = 0.0
-      grd%sst(i,j)= 0.0;  grd%sss(i,j)= 0.0
-      grd%cn(i,j) = 0.0 ;  grd%hi(i,j) = 0.0
     endif
-    if (grd%ua(i,j) .ne. grd%ua(i,j)) grd%ua(i,j)=0.
-    if (grd%va(i,j) .ne. grd%va(i,j)) grd%va(i,j)=0.
     if (grd%uo(i,j) .ne. grd%uo(i,j)) grd%uo(i,j)=0.
     if (grd%vo(i,j) .ne. grd%vo(i,j)) grd%vo(i,j)=0.
-    if (grd%ui(i,j) .ne. grd%ui(i,j)) grd%ui(i,j)=0.
-    if (grd%vi(i,j) .ne. grd%vi(i,j)) grd%vi(i,j)=0.
-    if (grd%sst(i,j) .ne. grd%sst(i,j)) grd%sst(i,j)=0.
-    if (grd%sss(i,j) .ne. grd%sss(i,j)) grd%sss(i,j)=0.
-    if (grd%cn(i,j) .ne. grd%cn(i,j)) grd%cn(i,j)=0.
-    if (grd%hi(i,j) .ne. grd%hi(i,j)) grd%hi(i,j)=0.
   enddo; enddo
 
   if (debug) call parts_chksum(parts, 'run parts (top)')
   if (debug) call checksum_gridded(parts%grd, 'top of s/r run')
 
-
-  ! Accumulate ice from calving
-  !call accumulate_calving(parts)
-  if (grd%id_accum>0) then
-    grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:)
-    grd%tmp(:,:)=grd%tmp(:,:)*grd%msk(:,:)*grd%area(:,:)-grd%calving(:,:)
-    lerr=send_data(grd%id_accum, grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  endif
-  if (grd%id_unused>0) &
-    lerr=send_data(grd%id_unused, grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  unused_calving=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  call mpp_clock_end(parts%clock_int)
-
-  call mpp_clock_begin(parts%clock_cal)
-  ! Calve excess stored ice into particles
-  if (parts%debug_particle_with_id>0) call monitor_a_part(parts, 'particles_run, before calving()   ')
-  !call calve_particles(parts)
-  if (debug) call parts_chksum(parts, 'run parts (calved)')
-  if (debug) call checksum_gridded(parts%grd, 's/r run after calving')
-  if (parts%debug_particle_with_id>0) call monitor_a_part(parts, 'particles_run, after calving()    ')
-  call mpp_clock_end(parts%clock_cal)
-
-  ! For each part, evolve
-  call mpp_clock_begin(parts%clock_mom)
 
   if (.not.parts%Static_particles) then
     call evolve_particles(parts)
@@ -944,46 +724,14 @@ subroutine particles_run(parts, time, calving, uo, vo, ui, vi,tauxa, tauya, ssh,
   if (parts%debug_particle_with_id>0) call monitor_a_part(parts, 'particles_run, after move_lists() ')
   if (debug) call parts_chksum(parts, 'run parts (evolved)',ignore_halo_violation=.true.)
   if (debug) call checksum_gridded(parts%grd, 's/r run after evolve')
-  call mpp_clock_end(parts%clock_mom)
-
-  ! Send parts to other PEs
-  call mpp_clock_begin(parts%clock_com)
-  !if (parts%particle_bonds_on)  call  bond_address_update(parts)
 
   call send_parts_to_other_pes(parts)
   if (parts%debug_particle_with_id>0) call monitor_a_part(parts, 'particles_run, after send_parts() ')
-  if ((parts%interactive_particles_on) .or. (parts%particle_bonds_on)) then
-    call update_halo_particles(parts)
-    if (parts%debug_particle_with_id>0) call monitor_a_part(parts, 'particles_run, after update_halo()')
-    !if (parts%particle_bonds_on)  call connect_all_bonds(parts)
-  endif
-  if (debug) call parts_chksum(parts, 'run parts (exchanged)')
-  if (debug) call checksum_gridded(parts%grd, 's/r run after exchange')
-  call mpp_clock_end(parts%clock_com)
-
-  ! Calculate mass on ocean before thermodynamics, to use in melt rate calculation
-  if (parts%find_melt_using_spread_mass) then
-    call calculate_mass_on_ocean(parts, with_diagnostics=.false.)
-    grd%spread_mass_old(:,:)=0.
-    call sum_up_spread_fields(parts,grd%spread_mass_old(grd%isc:grd%iec,grd%jsc:grd%jec), 'mass')
-    !Reset fields
-    grd%mass_on_ocean(:,:,:)=0.  ;  grd%area_on_ocean(:,:,:)=0.
-    grd%Uvel_on_ocean(:,:,:)=0.  ;  grd%Vvel_on_ocean(:,:,:)=0.
-  endif
-
-  ! particle thermodynamics (melting) + rolling
-  call mpp_clock_begin(parts%clock_the)
-  !call thermodynamics(parts)
-  if (parts%debug_particle_with_id>0) call monitor_a_part(parts, 'particles_run, after thermodyn()  ')
-  if (debug) call parts_chksum(parts, 'run parts (thermo)')
-  if (debug) call checksum_gridded(parts%grd, 's/r run after thermodynamics')
-  call mpp_clock_end(parts%clock_the)
 
   !Creating gridded fields from new particles
   call create_gridded_particles_fields(parts)
 
   ! For each part, record
-  call mpp_clock_begin(parts%clock_dia)
   if (sample_traj) call record_posn(parts)
   if (write_traj) then
     call move_all_trajectories(parts)
@@ -995,72 +743,10 @@ subroutine particles_run(parts, time, calving, uo, vo, ui, vi,tauxa, tauya, ssh,
     lerr=send_data(grd%id_uo, grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_vo>0) &
     lerr=send_data(grd%id_vo, grd%vo(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_ui>0) &
-    lerr=send_data(grd%id_ui, grd%ui(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_vi>0) &
-    lerr=send_data(grd%id_vi, grd%vi(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_ua>0) &
-    lerr=send_data(grd%id_ua, grd%ua(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_va>0) &
-    lerr=send_data(grd%id_va, grd%va(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_sst>0) &
-    lerr=send_data(grd%id_sst, grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_sss>0) &
-    lerr=send_data(grd%id_sss, grd%sss(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_cn>0) &
-    lerr=send_data(grd%id_cn, grd%cn(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_hi>0) &
-    lerr=send_data(grd%id_hi, grd%hi(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_floating_melt>0) &
-    lerr=send_data(grd%id_floating_melt, grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_melt_m_per_year>0) &
-    lerr=send_data(grd%id_melt_m_per_year, grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)* (86400.0*365.0/parts%rho_parts), Time)
-  if (grd%id_part_melt>0) &
-    lerr=send_data(grd%id_part_melt, grd%part_melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_melt_buoy>0) &
-    lerr=send_data(grd%id_melt_buoy, grd%melt_buoy(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_melt_eros>0) &
-    lerr=send_data(grd%id_melt_eros, grd%melt_eros(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_melt_conv>0) &
-    lerr=send_data(grd%id_melt_conv, grd%melt_conv(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_virtual_area>0) &
-    lerr=send_data(grd%id_virtual_area, grd%virtual_area(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_party_src>0) &
-    lerr=send_data(grd%id_party_src, grd%party_src(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_party_melt>0) &
-    lerr=send_data(grd%id_party_melt, grd%party_melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_party_mass>0) &
-    lerr=send_data(grd%id_party_mass, grd%party_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_spread_mass>0) &
-    lerr=send_data(grd%id_spread_mass, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_spread_area>0) &
-    lerr=send_data(grd%id_spread_area, grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_u_particle>0) &
     lerr=send_data(grd%id_u_particle, grd%u_particle(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_v_particle>0) &
     lerr=send_data(grd%id_v_particle, grd%v_particle(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_spread_uvel>0) &
-    lerr=send_data(grd%id_spread_uvel, grd%spread_uvel(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_spread_vvel>0) &
-    lerr=send_data(grd%id_spread_vvel, grd%spread_vvel(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_ustar_particle>0) &
-    lerr=send_data(grd%id_ustar_particle, grd%ustar_particle(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_mass>0) &
-    lerr=send_data(grd%id_mass, grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  !if (grd%id_stored_ice>0) &
-  !  lerr=send_data(grd%id_stored_ice, grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
-  !if (grd%id_rmean_calving>0) &
-  !  lerr=send_data(grd%id_rmean_calving, grd%rmean_calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  !if (grd%id_rmean_calving_hflx>0) &
-  !  lerr=send_data(grd%id_rmean_calving_hflx, grd%rmean_calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  !if (grd%id_real_calving>0) &
-  !  lerr=send_data(grd%id_real_calving, grd%real_calving(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
-  if (grd%id_ssh>0) &
-    lerr=send_data(grd%id_ssh, grd%ssh(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (grd%id_fax>0) &
-    lerr=send_data(grd%id_fax, tauxa(:,:), Time)
-  if (grd%id_fay>0) &
-    lerr=send_data(grd%id_fay, tauya(:,:), Time)
   if (grd%id_count>0) then
     allocate( iCount(grd%isc:grd%iec,grd%jsc:grd%jec) ); iCount(:,:)=0
     do j = grd%jsc, grd%jec ; do i = grd%isc, grd%iec
@@ -1081,230 +767,8 @@ subroutine particles_run(parts, time, calving, uo, vo, ui, vi,tauxa, tauya, ssh,
   ! Dump particles to screen
   if (really_debug) call print_parts(stderrunit,parts,'particles_run, status')
 
-  ! Dump particles bonds to screen
-  !if (really_debug)  call show_all_bonds(parts)
-
-  call mpp_clock_end(parts%clock_dia)
-
-  ! This is the point in the algorithm which determines which fields get passed to the ice model
-  ! Return what ever calving we did not use and additional particles melt
-
-  ! Making sure that spread_mass has the correct mass
-  !grd%spread_mass(:,:)=0.0
-  !call particles_incr_mass(parts, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), within_particle_model=.True.)
-
-
-  ! Return what ever calving we did not use and additional particles melt
-  call mpp_clock_begin(parts%clock_int)
-  if (.not. parts%passive_mode) then
-    where (grd%area(grd%isc:grd%iec,grd%jsc:grd%jec)>0.)
-      calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)/grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) &
-                  +grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)
-    elsewhere
-      calving(:,:)=0.
-    end where
-    calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
-    !Return particle mass, area and ustar to pass on to ocean model
-    if (present(mass_part)) then
-      if (associated(mass_part)) then
-        if (parts%add_weight_to_ocean) &
-          mass_part(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
-      endif
-    endif
-    if (present(ustar_part)) then
-      if (associated(ustar_part)) then
-        ustar_part(:,:)=grd%ustar_particle(grd%isc:grd%iec,grd%jsc:grd%jec)
-      endif
-    endif
-    if (present(area_part)) then
-      if (associated(area_part)) then
-        area_part(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
-      endif
-    endif
-  endif
-
-  call mpp_clock_end(parts%clock_int)
-
-  ! Diagnose budgets
-  call mpp_clock_begin(parts%clock_dia)
-  tmpsum=sum( grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  parts%net_melt=parts%net_melt+tmpsum*parts%dt
-  parts%net_outgoing_calving=parts%net_outgoing_calving+(unused_calving+tmpsum)*parts%dt
-  tmpsum=sum( grd%part_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  parts%part_melt=parts%part_melt+tmpsum*parts%dt
-  tmpsum=sum( grd%party_src(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  parts%party_src=parts%party_src+tmpsum*parts%dt
-  tmpsum=sum( grd%party_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  parts%party_melt=parts%party_melt+tmpsum*parts%dt
-  tmpsum=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  parts%net_calving_returned=parts%net_calving_returned+tmpsum*parts%dt
-  tmpsum=sum( grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  parts%net_outgoing_calving_heat=parts%net_outgoing_calving_heat+tmpsum*parts%dt ! Units of J
-  if (lbudget) then
-    !parts%stored_end=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
-    !parts%rmean_calving_end=sum( grd%rmean_calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
-    !parts%rmean_calving_hflx_end=sum( grd%rmean_calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec) )
-    !parts%stored_heat_end=sum( grd%stored_heat(grd%isc:grd%iec,grd%jsc:grd%jec) )
-    parts%floating_mass_end=sum_mass(parts)
-    parts%particles_mass_end=sum_mass(parts,justparts=.true.)
-    parts%party_mass_end=sum_mass(parts,justbits=.true.)
-    !parts%spread_mass_end=sum_mass(parts) !Not sure what this is
-    !parts%spread_area_end=sum_mass(parts) !Not sure what this is
-    !parts%u_particle_end=sum_mass(parts) !Not sure what this is
-    !parts%v_particle_end=sum_mass(parts) !Not sure what this is
-    parts%floating_heat_end=sum_heat(parts)
-    grd%tmpc(:,:)=0.
-    !Finding spread mass
-    call mpp_clock_end(parts%clock); call mpp_clock_end(parts%clock_dia) ! To enable calling of public s/r
-    call sum_up_spread_fields(parts, grd%tmpc, 'mass')
-    call mpp_clock_begin(parts%clock_dia); call mpp_clock_begin(parts%clock) ! To enable calling of public s/r
-    parts%returned_mass_on_ocean=sum( grd%tmpc(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-    !Finding spread area
-    call mpp_clock_end(parts%clock); call mpp_clock_end(parts%clock_dia) ! To enable calling of public s/r
-    call sum_up_spread_fields(parts, grd%tmpc, 'area')
-    call mpp_clock_begin(parts%clock_dia); call mpp_clock_begin(parts%clock) ! To enable calling of public s/r
-    parts%returned_area_on_ocean=sum( grd%tmpc(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-    parts%nparts_end=count_parts(parts)
-    call mpp_sum(parts%stored_end)
-    !call mpp_sum(parts%stored_heat_end)
-    call mpp_sum(parts%floating_mass_end)
-    call mpp_sum(parts%particles_mass_end)
-    call mpp_sum(parts%party_mass_end)
-    call mpp_sum(parts%spread_mass_end)
-    call mpp_sum(parts%spread_area_end)
-    call mpp_sum(parts%u_particle_end)
-    call mpp_sum(parts%v_particle_end)
-    call mpp_sum(parts%spread_uvel_end)
-    call mpp_sum(parts%spread_vvel_end)
-    call mpp_sum(parts%ustar_particle_end)
-    call mpp_sum(parts%floating_heat_end)
-    call mpp_sum(parts%returned_mass_on_ocean)
-    call mpp_sum(parts%nparts_end)
-    call mpp_sum(parts%nparts_calved)
-    do k=1,nclasses; call mpp_sum(parts%nparts_calved_by_class(k)); enddo
-    call mpp_sum(parts%nparts_melted)
-    call mpp_sum(parts%nspeeding_tickets)
-    call mpp_sum(parts%net_calving_returned)
-    call mpp_sum(parts%net_outgoing_calving)
-    call mpp_sum(parts%net_calving_received)
-    call mpp_sum(parts%net_incoming_calving)
-    call mpp_sum(parts%net_incoming_calving_heat)
-    call mpp_sum(parts%net_incoming_calving_heat_used)
-    call mpp_sum(parts%net_outgoing_calving_heat)
-    call mpp_sum(parts%net_calving_used)
-    call mpp_sum(parts%net_calving_to_parts)
-    call mpp_sum(parts%net_heat_to_parts)
-    call mpp_sum(parts%net_heat_to_ocean)
-    call mpp_sum(parts%net_melt)
-    call mpp_sum(parts%part_melt)
-    call mpp_sum(parts%party_src)
-    call mpp_sum(parts%party_melt)
-    grdd_part_mass=sum( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-    call mpp_sum(grdd_part_mass)
-    grdd_party_mass=sum( grd%party_mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-    call mpp_sum(grdd_party_mass)
-    grdd_spread_mass=sum( grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-    call mpp_sum(grdd_spread_mass)
-    grdd_spread_area=sum( grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-    call mpp_sum(grdd_spread_area)
-    if (mpp_pe().eq.mpp_root_pe()) then
- 100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
- 200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
-      call report_state('stored ice','kg','',parts%stored_start,'',parts%stored_end,'')
-      call report_state('floating','kg','',parts%floating_mass_start,'',parts%floating_mass_end,'',parts%nparts_end)
-      call report_state('particles','kg','',parts%particles_mass_start,'',parts%particles_mass_end,'')
-      call report_state('bits','kg','',parts%party_mass_start,'',parts%party_mass_end,'')
-      call report_state('spread particles','kg','',parts%spread_mass_start,'',parts%spread_mass_end,'')
-      call report_state('spread particles','m^2','',parts%spread_area_start,'',parts%spread_area_end,'')
-      call report_istate('part #','',parts%nparts_start,'',parts%nparts_end,'')
-      call report_ibudget('part #','calved',parts%nparts_calved, &
-                                   'melted',parts%nparts_melted, &
-                                   '#',parts%nparts_start,parts%nparts_end)
-      call report_budget('stored mass','kg','calving used',parts%net_calving_used, &
-                                            'parts',parts%net_calving_to_parts, &
-                                            'stored mass',parts%stored_start,parts%stored_end)
-      call report_budget('floating mass','kg','calving used',parts%net_calving_to_parts, &
-                                              'parts',parts%net_melt, &
-                                              'stored mass',parts%floating_mass_start,parts%floating_mass_end)
-      call report_budget('part mass','kg','calving',parts%net_calving_to_parts, &
-                                          'melt+eros',parts%part_melt, &
-                                          'part mass',parts%particles_mass_start,parts%particles_mass_end)
-      call report_budget('bits mass','kg','eros used',parts%party_src, &
-                                          'parts',parts%party_melt, &
-                                          'stored mass',parts%party_mass_start,parts%party_mass_end)
-      call report_budget('net mass','kg','recvd',parts%net_calving_received, &
-                                         'rtrnd',parts%net_calving_returned, &
-                                         'net mass',parts%stored_start+parts%floating_mass_start, &
-                                                    parts%stored_end+parts%floating_mass_end)
-      call report_consistant('particle mass','kg','gridded',grdd_part_mass,'parts',parts%particles_mass_end)
-      call report_consistant('spread mass','kg','gridded',grdd_spread_mass,'parts',parts%spread_mass_end)
-      call report_consistant('spread area','kg','gridded',grdd_spread_area,'parts',parts%spread_area_end)
-      call report_consistant('bits mass','kg','gridded',grdd_party_mass,'bits',parts%party_mass_end)
-      call report_consistant('wieght','kg','returned',parts%returned_mass_on_ocean,'floating',parts%floating_mass_end)
-      !call report_state('net heat','J','',parts%stored_heat_start+parts%floating_heat_start,'',&
-      !     & parts%stored_heat_end+parts%floating_heat_end,'')
-      !call report_state('stored heat','J','',parts%stored_heat_start,'',parts%stored_heat_end,'')
-      call report_state('floating heat','J','',parts%floating_heat_start,'',parts%floating_heat_end,'')
-      !call report_budget('net heat','J','net heat',parts%net_incoming_calving_heat, &
-      !                                  'net heat',parts%net_outgoing_calving_heat, &
-      !                                  'net heat',parts%stored_heat_start+parts%floating_heat_start, &
-      !                                             parts%stored_heat_end+parts%floating_heat_end)
-      !call report_budget('stored heat','J','calving used',parts%net_incoming_calving_heat_used, &
-      !                                     'parts',parts%net_heat_to_parts, &
-      !                                     'net heat',parts%stored_heat_start,parts%stored_heat_end)
-      !call report_budget('flting heat','J','calved',parts%net_heat_to_parts, &
-      !                                     'melt',parts%net_heat_to_ocean, &
-      !                                     'net heat',parts%floating_heat_start,parts%floating_heat_end)
-      if (debug) then
-        call report_consistant('top interface','kg','from SIS',parts%net_incoming_calving,'seen by diamonds',&
-             & parts%net_calving_received)
-        call report_consistant('bot interface','kg','sent',parts%net_outgoing_calving,'seen by SIS',parts%net_calving_returned)
-      endif
-      write(*,'("diamonds: calved by class = ",i4,20(",",i4))') (parts%nparts_calved_by_class(k),k=1,nclasses)
-      if (parts%nspeeding_tickets>0) write(*,'("diamonds: speeding tickets issued = ",i4)') parts%nspeeding_tickets
-    endif
-    parts%nparts_start=parts%nparts_end
-    parts%stored_start=parts%stored_end
-    parts%nparts_melted=0
-    parts%nparts_calved=0
-    parts%nparts_calved_by_class(:)=0
-    parts%nspeeding_tickets=0
-    !parts%stored_heat_start=parts%stored_heat_end
-    parts%floating_heat_start=parts%floating_heat_end
-    parts%floating_mass_start=parts%floating_mass_end
-    parts%particles_mass_start=parts%particles_mass_end
-    parts%party_mass_start=parts%party_mass_end
-    parts%spread_mass_start=parts%spread_mass_end
-    parts%spread_area_start=parts%spread_area_end
-    parts%net_calving_used=0.
-    parts%net_calving_to_parts=0.
-    parts%net_heat_to_parts=0.
-    parts%net_heat_to_ocean=0.
-    parts%net_calving_received=0.
-    parts%net_calving_returned=0.
-    parts%net_incoming_calving=0.
-    parts%net_outgoing_calving=0.
-    parts%net_incoming_calving_heat=0.
-    parts%net_incoming_calving_heat_used=0.
-    parts%net_outgoing_calving_heat=0.
-    parts%net_melt=0.
-    parts%part_melt=0.
-    parts%party_melt=0.
-    parts%party_src=0.
-
-    !if (parts%particle_bonds_on) then
-    !  check_bond_quality=.true.
-    !  nbonds=0
-    !  call count_bonds(parts, nbonds,check_bond_quality)
-    !endif
-  endif
-
   if (debug) call parts_chksum(parts, 'run parts (bot)')
   if (debug) call checksum_gridded(parts%grd, 'end of s/r run')
-  call mpp_clock_end(parts%clock_dia)
-
-  call mpp_clock_end(parts%clock)
-
 end subroutine particles_run
 
 
