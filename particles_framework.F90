@@ -42,6 +42,7 @@ logical :: fix_restart_dates=.true. !< After a restart, check that parts were cr
 logical :: do_unit_tests=.false. !< Conduct some unit tests
 logical :: force_all_pes_traj=.false. !< Force all pes write trajectory files regardless of io_layout
 
+
 !Public params !Niki: write a subroutine to expose these
 public nclasses,buffer_width,buffer_width_traj
 public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,old_bug_bilin,use_roundoff_fix
@@ -56,7 +57,7 @@ public particles_framework_init
 public send_parts_to_other_pes
 public update_halo_particles
 public pack_traj_into_buffer2, unpack_traj_from_buffer2
-public increase_ibuffer, increase_ibuffer_traj
+public increase_ibuffer
 public add_new_part_to_list, count_out_of_order, check_for_duplicates
 public insert_part_into_list, create_particle, delete_particle_from_list, destroy_particle
 public print_fld,print_part, print_parts,record_posn, push_posn, append_posn, check_position
@@ -72,38 +73,85 @@ public find_individual_particle
 public monitor_a_part
 public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
-public check_for_duplicates_in_parallel,pi_180
-!public split_id, id_from_2_ints, generate_id, cij_from_old_id, convert_old_id
+public check_for_duplicates_in_parallel
+public split_id, id_from_2_ints!, generate_id, cij_from_old_id, convert_old_id
 
+!> Container for gridded fields
 type :: particles_gridded
-  type(domain2D), pointer :: domain ! MPP domain
-  integer :: halo ! Nominal halo width
-  integer :: isc, iec, jsc, jec ! Indices of computational domain
-  integer :: isd, ied, jsd, jed ! Indices of data domain
-  integer :: isg, ieg, jsg, jeg ! Indices of global domain
-  integer :: my_pe, pe_N, pe_S, pe_E, pe_W ! MPI PE identifiers
+  type(domain2D), pointer :: domain !< MPP parallel domain
+  integer :: halo !< Nominal halo width
+  integer :: isc !< Start i-index of computational domain
+  integer :: iec !< End i-index of computational domain
+  integer :: jsc !< Start j-index of computational domain
+  integer :: jec !< End j-index of computational domain
+  integer :: isd !< Start i-index of data domain
+  integer :: ied !< End i-index of data domain
+  integer :: jsd !< Start j-index of data domain
+  integer :: jed !< End j-index of data domain
+  integer :: isg !< Start i-index of global domain
+  integer :: ieg !< End i-index of global domain
+  integer :: jsg !< Start j-index of global domain
+  integer :: jeg !< End j-index of global domain
+  integer :: my_pe !< MPI PE index
+  integer :: pe_N !< MPI PE index of PE to the north
+  integer :: pe_S !< MPI PE index of PE to the south
+  integer :: pe_E !< MPI PE index of PE to the east
+  integer :: pe_W !< MPI PE index of PE to the west
   logical :: grid_is_latlon !< Flag to say whether the coordinate is in lat-lon degrees, or meters
   logical :: grid_is_regular !< Flag to say whether point in cell can be found assuming regular Cartesian grid
   real :: Lx !< Length of the domain in x direction
-  real, dimension(:,:), pointer :: lon=>null() ! Longitude of cell corners
-  real, dimension(:,:), pointer :: lat=>null() ! Latitude of cell corners
-  real, dimension(:,:), pointer :: lonc=>null() ! Longitude of cell centers
-  real, dimension(:,:), pointer :: latc=>null() ! Latitude of cell centers
-  real, dimension(:,:), pointer :: dx=>null() ! Length of cell edge (m)
-  real, dimension(:,:), pointer :: dy=>null() ! Length of cell edge (m)
+  real, dimension(:,:), pointer :: lon=>null() !< Longitude of cell corners (degree E)
+  real, dimension(:,:), pointer :: lat=>null() !< Latitude of cell corners (degree N)
+  real, dimension(:,:), pointer :: lonc=>null() !< Longitude of cell centers (degree E)
+  real, dimension(:,:), pointer :: latc=>null() !< Latitude of cell centers (degree N)
+  real, dimension(:,:), pointer :: dx=>null() !< Length of cell edge (m)
+  real, dimension(:,:), pointer :: dy=>null() !< Length of cell edge (m)
   real, dimension(:,:), pointer :: area=>null() !< Area of cell (m^2)
-  real, dimension(:,:), pointer :: msk=>null() ! Ocean-land mask (1=ocean)
-  real, dimension(:,:), pointer :: cos=>null() ! Cosine from rotation matrix to lat-lon coords
-  real, dimension(:,:), pointer :: sin=>null() ! Sine from rotation matrix to lat-lon coords
-  real, dimension(:,:), pointer :: ocean_depth=>NULL() ! Depth of ocean (m)
-  real, dimension(:,:), pointer :: uo=>null() ! Ocean zonal flow (m/s)
-  real, dimension(:,:), pointer :: vo=>null() ! Ocean meridional flow (m/s)
-  real, dimension(:,:), pointer :: tmp=>null() ! Temporary work space
-  real, dimension(:,:), pointer :: tmpc=>null() ! Temporary work space
-  real, dimension(:,:), pointer :: parity_x=>null() ! X component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
-  real, dimension(:,:), pointer :: parity_y=>null() ! Y component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
-  integer, dimension(:,:), pointer :: particle_num=>null() ! Counts particles created for naming purposes
-
+  real, dimension(:,:), pointer :: msk=>null() !< Ocean-land mask (1=ocean)
+  real, dimension(:,:), pointer :: cos=>null() !< Cosine from rotation matrix to lat-lon coords
+  real, dimension(:,:), pointer :: sin=>null() !< Sine from rotation matrix to lat-lon coords
+  real, dimension(:,:), pointer :: ocean_depth=>NULL() !< Depth of ocean (m)
+  real, dimension(:,:), pointer :: uo=>null() !< Ocean zonal flow (m/s)
+  real, dimension(:,:), pointer :: vo=>null() !< Ocean meridional flow (m/s)
+  real, dimension(:,:), pointer :: ui=>null() !< Ice zonal flow (m/s)
+  real, dimension(:,:), pointer :: vi=>null() !< Ice meridional flow (m/s)
+  real, dimension(:,:), pointer :: ua=>null() !< Atmosphere zonal flow (m/s)
+  real, dimension(:,:), pointer :: va=>null() !< Atmosphere meridional flow (m/s)
+  real, dimension(:,:), pointer :: ssh=>null() !< Sea surface height (m)
+  real, dimension(:,:), pointer :: sst=>null() !< Sea surface temperature (oC)
+  real, dimension(:,:), pointer :: sss=>null() !< Sea surface salinity (psu)
+  real, dimension(:,:), pointer :: cn=>null() !< Sea-ice concentration (0 to 1)
+  real, dimension(:,:), pointer :: hi=>null() !< Sea-ice thickness (m)
+  real, dimension(:,:), pointer :: calving=>null() !< Calving mass rate [frozen runoff] (kg/s) (into stored ice)
+  real, dimension(:,:), pointer :: calving_hflx=>null() !< Calving heat flux [heat content of calving] (W/m2) (into stored ice)
+  real, dimension(:,:), pointer :: floating_melt=>null() !< Net melting rate to particles + bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: part_melt=>null() !< Melting+erosion rate of particles (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_buoy=>null() !< Buoyancy component of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_eros=>null() !< Erosion component of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_conv=>null() !< Convective component of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: party_src=>null() !< Mass flux from part erosion into party bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: party_melt=>null() !< Melting rate of party bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: party_mass=>null() !< Mass distribution of party bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: spread_mass=>null() !< Mass of particles after spreading (kg/m^2)
+  real, dimension(:,:), pointer :: spread_mass_old=>null() !< Mass of particles after spreading old (kg/m^2)
+  real, dimension(:,:), pointer :: spread_area=>null() !< Area of particles after spreading (m^2/m^2)
+  real, dimension(:,:), pointer :: u_particle=>null() !< Average particle velocity in grid cell (mass weighted - but not spread mass weighted)
+  real, dimension(:,:), pointer :: v_particle=>null() !< Average particle velocity in grid cell (mass weighted - but not spread mass weighted)
+  real, dimension(:,:), pointer :: spread_uvel=>null() !< Average particle velocity in grid cell (spread area weighted)
+  real, dimension(:,:), pointer :: spread_vvel=>null() !< Average particle velocity in grid cell (spread area weighted)
+  real, dimension(:,:), pointer :: ustar_particle=>null() !< Frictional velocity below particles to be passed to ocean
+  real, dimension(:,:), pointer :: virtual_area=>null() !< Virtual surface coverage by particles (m^2)
+  real, dimension(:,:), pointer :: mass=>null() !< Mass distribution (kg/m^2)
+  real, dimension(:,:,:), pointer :: mass_on_ocean=>null() !< Mass distribution partitioned by neighbor (kg)
+  real, dimension(:,:,:), pointer :: area_on_ocean=>null() !< Area distribution partitioned by neighbor (m^2)
+  real, dimension(:,:,:), pointer :: Uvel_on_ocean=>null() !< zonal velocity distribution partitioned by neighbor (m^2* m/s)
+  real, dimension(:,:,:), pointer :: Vvel_on_ocean=>null() !< meridional momentum distribution partitioned by neighbor (m^2 m/s)
+  real, dimension(:,:), pointer :: tmp=>null() !< Temporary work space
+  real, dimension(:,:), pointer :: tmpc=>null() !< Temporary work space
+  real, dimension(:,:), pointer :: parity_x=>null() !< X component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
+  real, dimension(:,:), pointer :: parity_y=>null() !< Y component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
+  integer, dimension(:,:), pointer :: particle_counter_grd=>null() !< Counts particles created for naming purposes
+  !>@{
   !! Diagnostic handle
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_floating_melt=-1
   integer :: id_melt_buoy=-1, id_melt_eros=-1, id_melt_conv=-1, id_virtual_area=-1, id_real_calving=-1
@@ -117,7 +165,12 @@ type :: particles_gridded
   integer :: id_spread_uvel=-1, id_spread_vvel=-1
   integer :: id_melt_m_per_year=-1
   integer :: id_ocean_depth=-1
+  !>@}
+
+  real :: clipping_depth=0. !< The effective depth at which to clip the weight felt by the ocean [m].
+
 end type particles_gridded
+
 
 type :: xyt
   real :: lon, lat, day
@@ -541,7 +594,7 @@ real :: Total_mass  !Added by Alon
   allocate( grd%tmpc(grd%isc:grd%iec, grd%jsc:grd%jec) ); grd%tmpc(:,:)=0.
   allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
   allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
-  allocate( grd%particle_num(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%particle_num(:,:)=0
+  allocate( grd%particle_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%particle_counter_grd(:,:)=0
 
  !write(stderrunit,*) 'diamonds: copying grid'
   ! Copy data declared on ice model computational domain
@@ -3479,53 +3532,61 @@ integer :: stderrunit
 end subroutine check_position
 
 ! ##############################################################################
-
-real function sum_mass(first,justbits,justparts)
+!> Add up the mass of parts and/or party bits
+real function sum_mass(parts, justbits, justparts)
 ! Arguments
-type(particle), pointer :: first
-logical, intent(in), optional :: justbits, justparts
+type(particles), pointer :: parts !< Container for all types and memory
+logical, intent(in), optional :: justbits !< If present, add up mass of just party bits
+logical, intent(in), optional :: justparts !< If present, add up mass of just parts
 ! Local variables
 type(particle), pointer :: this
+integer :: grdi, grdj
 
   sum_mass=0.
-  this=>first
-  do while(associated(this))
-    if (present(justparts)) then
-      sum_mass=sum_mass+this%mass*this%mass_scaling
-    elseif (present(justbits)) then
-      sum_mass=sum_mass+this%mass_of_bits*this%mass_scaling
-    else
-      sum_mass=sum_mass+(this%mass+this%mass_of_bits)*this%mass_scaling
-    endif
-    this=>this%next
-  enddo
+  do grdj = parts%grd%jsc,parts%grd%jec ; do grdi = parts%grd%isc,parts%grd%iec
+    this=>parts%list(grdi,grdj)%first
+    do while(associated(this))
+      if (present(justparts)) then
+        sum_mass=sum_mass+this%mass*this%mass_scaling
+      elseif (present(justbits)) then
+        sum_mass=sum_mass+this%mass_of_bits*this%mass_scaling
+      else
+        sum_mass=sum_mass+(this%mass+this%mass_of_bits)*this%mass_scaling
+      endif
+      this=>this%next
+    enddo
+  enddo ; enddo
 
 end function sum_mass
 
 ! ##############################################################################
-
-real function sum_heat(first,justbits,justparts)
+!> Add up the heat content of parts and/or party bits
+real function sum_heat(parts,justbits,justparts)
 ! Arguments
-type(particle), pointer :: first
-logical, intent(in), optional :: justbits, justparts
+type(particles), pointer :: parts !< Container for all types and memory
+logical, intent(in), optional :: justbits !< If present, add up heat content of just party bits
+logical, intent(in), optional :: justparts !< If present, add up heat content of just parts
 ! Local variables
 type(particle), pointer :: this
 real :: dm
+integer :: grdi, grdj
 
   sum_heat=0.
-  this=>first
-  do while(associated(this))
-    dm=0.
-    if (present(justparts)) then
-      dm=this%mass*this%mass_scaling
-    elseif (present(justbits)) then
-      dm=this%mass_of_bits*this%mass_scaling
-    else
-      dm=(this%mass+this%mass_of_bits)*this%mass_scaling
-    endif
-    sum_heat=sum_heat+dm*this%heat_density
-    this=>this%next
-  enddo
+  do grdj = parts%grd%jsc,parts%grd%jec ; do grdi = parts%grd%isc,parts%grd%iec
+    this=>parts%list(grdi,grdj)%first
+    do while(associated(this))
+      dm=0.
+      if (present(justparts)) then
+        dm=this%mass*this%mass_scaling
+      elseif (present(justbits)) then
+        dm=this%mass_of_bits*this%mass_scaling
+      else
+        dm=(this%mass+this%mass_of_bits)*this%mass_scaling
+      endif
+      sum_heat=sum_heat+dm*this%heat_density
+      this=>this%next
+    enddo
+  enddo ; enddo
 
 end function sum_heat
 

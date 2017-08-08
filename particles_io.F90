@@ -1,5 +1,7 @@
 module particles_io
 
+use constants_mod, only: pi, omega, HLF
+
 use mpp_domains_mod, only: domain2D
 use mpp_domains_mod, only: mpp_domain_is_tile_root_pe,mpp_get_domain_tile_root_pe
 use mpp_domains_mod, only: mpp_get_tile_pelist,mpp_get_tile_npes,mpp_get_io_domain,mpp_get_tile_id
@@ -27,7 +29,8 @@ use MOM_grid, only : ocean_grid_type
 use particles_framework, only: particles_gridded, xyt, particle, particles, buffer
 use particles_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
 use particles_framework, only: find_cell,find_cell_by_search,count_parts,is_point_in_cell,pos_within_cell,append_posn
-!use particles_framework, only: count_bonds, form_a_bond, find_individual_particle
+!use particles_framework, only: count_bonds, form_a_bond
+use particles_framework, only: find_individual_particle
 use particles_framework, only: push_posn
 use particles_framework, only: add_new_part_to_list,destroy_particle
 use particles_framework, only: increase_ibuffer,grd_chksum2,grd_chksum3
@@ -35,9 +38,9 @@ use particles_framework, only: sum_mass,sum_heat,bilin
 !params !Niki: write a subroutine to get these
 use particles_framework, only: nclasses, buffer_width, buffer_width_traj
 use particles_framework, only: verbose, really_debug, debug, restart_input_dir,make_calving_reproduce
-use particles_framework, only: ignore_ij_restart, use_slow_find,generate_test_particles,print_part
+use particles_framework, only: ignore_ij_restart, use_slow_find,generate_test_particles!,print_part
 use particles_framework, only: force_all_pes_traj
-use particles_framework, only: check_for_duplicates_in_parallel
+!use particles_framework, only: check_for_duplicates_in_parallel
 !use particles_framework, only: split_id, id_from_2_ints, generate_id
 
 implicit none ; private
@@ -46,6 +49,7 @@ include 'netcdf.inc'
 
 public particles_io_init
 public read_restart_parts, write_restart,write_trajectory
+
 
 !Local Vars
 integer, parameter :: file_format_major_version=0
@@ -66,9 +70,10 @@ integer :: clock_trw,clock_trp
 
 contains
 
+!> Initialize parallel i/o
 subroutine particles_io_init(parts, io_layout)
-type(particles), pointer :: parts
-integer, intent(in) :: io_layout(2)
+type(particles), pointer :: parts !< particles container
+integer, intent(in) :: io_layout(2) !< Decomposition of i/o processors
 
 integer :: np
 integer :: stdlogunit, stderrunit
@@ -78,7 +83,7 @@ integer :: stdlogunit, stderrunit
   stdlogunit=stdlog()
   write(stdlogunit,*) "particles_framework: "//trim(version)
 
-  !I/O layout init 
+  !I/O layout init
   io_tile_id=-1
   io_domain => mpp_get_io_domain(parts%grd%domain)
   if(associated(io_domain)) then
@@ -91,8 +96,8 @@ integer :: stdlogunit, stderrunit
      io_npes = io_layout(1)*io_layout(2)
   endif
 
-  clock_trw=mpp_clock_id( 'Particles-traj write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  clock_trp=mpp_clock_id( 'Particles-traj prepare', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  clock_trw=mpp_clock_id( 'particles-traj write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  clock_trp=mpp_clock_id( 'particles-traj prepare', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
 
 end subroutine particles_io_init
 
@@ -246,24 +251,21 @@ real, allocatable,dimension(:) :: lon,	&
 end subroutine read_restart_parts
 
 ! ##############################################################################
-
-subroutine write_trajectory(trajectory)
-
-use particles_framework, only: increase_ibuffer_traj
+!> Write a trajectory-based diagnostics file
+subroutine write_trajectory(trajectory, save_short_traj)
 ! Arguments
-type(xyt), pointer :: trajectory
+type(xyt), pointer :: trajectory !< An iceberg trajectory
+logical, intent(in) :: save_short_traj !< If true, record less data
 ! Local variables
 integer :: iret, ncid, i_dim, i
-integer :: lonid, latid, yearid, dayid, uvelid, vvelid, particle_numid
-!integer :: axnid, aynid, uvel_oldid, vvel_oldid, lat_oldid, lon_oldid, bxnid, bynid !Added by Alon 
-integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid
+integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
+integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid
 integer :: mid, did, wid, lid, mbid, hdid
 character(len=37) :: filename
 character(len=7) :: pe_name
 type(xyt), pointer :: this, next
-integer :: stderrunit
-
+integer :: stderrunit, cnt, ij
 !I/O vars
 type(xyt), pointer :: traj4io=>null()
 integer :: ntrajs_sent_io,ntrajs_rcvd_io
@@ -271,262 +273,8 @@ integer :: from_pe,np
 type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
 logical :: io_is_in_append_mode
 
-  ! Get the stderr unit number
-  stderrunit=stderr()
-  traj4io=>null()
-  obuffer_io=>null()
-  ibuffer_io=>null()
 
-  !Assemble the list of trajectories from all pes in this I/O tile
-  call mpp_clock_begin(clock_trp)
-
-  !First add the trajs on the io_tile_root_pe (if any) to the I/O list
-  if(is_io_tile_root_pe .OR. force_all_pes_traj ) then
-     if(associated(trajectory)) then
-        this=>trajectory
-        do while (associated(this))
-           call append_posn(traj4io, this)
-           this=>this%next
-        enddo
-        trajectory => null()
-     endif
-  endif
-
-  if(.NOT. force_all_pes_traj ) then
-
-  !Now gather and append the parts from all pes in the io_tile to the list on corresponding io_tile_root_pe
-  ntrajs_sent_io =0
-  ntrajs_rcvd_io =0 
-
-  if(is_io_tile_root_pe) then
-     !Receive trajs from all pes in this I/O tile !FRAGILE!SCARY!
-     do np=2,size(io_tile_pelist) ! Note: np starts from 2 to exclude self
-        from_pe=io_tile_pelist(np)
-        call mpp_recv(ntrajs_rcvd_io, glen=1, from_pe=from_pe, tag=COMM_TAG_11)
-        if (ntrajs_rcvd_io .gt. 0) then
-           call increase_ibuffer_traj(ibuffer_io, ntrajs_rcvd_io)
-           call mpp_recv(ibuffer_io%data, ntrajs_rcvd_io*buffer_width_traj,from_pe=from_pe, tag=COMM_TAG_12)
-           do i=1, ntrajs_rcvd_io
-              call unpack_traj_from_buffer2(traj4io, ibuffer_io, i)
-           enddo
-       endif
-     enddo
-  else
-     ! Pack and send trajectories to the root PE for this I/O tile
-     do while (associated(trajectory))
-       ntrajs_sent_io = ntrajs_sent_io +1
-       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io)
-       this => trajectory ! Need to keep pointer in order to free up the links memory
-       trajectory => trajectory%next ! This will eventually result in trajectory => null()
-       deallocate(this) ! Delete the link from memory
-     enddo
-        
-     call mpp_send(ntrajs_sent_io, plen=1, to_pe=io_tile_root_pe, tag=COMM_TAG_11)
-     if (ntrajs_sent_io .gt. 0) then
-        call mpp_send(obuffer_io%data, ntrajs_sent_io*buffer_width_traj, to_pe=io_tile_root_pe, tag=COMM_TAG_12)
-     endif
-  endif
-
-  endif !.NOT. force_all_pes_traj
-
-  call mpp_clock_end(clock_trp)
-
-  !Now start writing in the io_tile_root_pe if there are any parts in the I/O list
-  call mpp_clock_begin(clock_trw)
-
-  if((force_all_pes_traj .OR. is_io_tile_root_pe) .AND. associated(traj4io)) then
- 
-    call get_instance_filename("particle_trajectories.nc", filename)
-    if(io_tile_id(1) .ge. 0 .AND. .NOT. force_all_pes_traj) then !io_tile_root_pes write
-       if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
-          if (io_tile_id(1)<10000) then
-             write(filename,'(A,".",I4.4)') trim(filename), io_tile_id(1) 
-          else
-             write(filename,'(A,".",I6.6)') trim(filename), io_tile_id(1) 
-          endif
-       endif
-    else !All pes write, attach pe# to filename
-       if (mpp_npes()<10000) then
-          write(filename,'(A,".",I4.4)') trim(filename), mpp_pe() 
-       else
-          write(filename,'(A,".",I6.6)') trim(filename), mpp_pe() 
-       endif
-    endif
-
-    io_is_in_append_mode = .false.
-    iret = nf_create(filename, NF_NOCLOBBER, ncid)
-    if (iret .ne. NF_NOERR) then
-      iret = nf_open(filename, NF_WRITE, ncid)
-      io_is_in_append_mode = .true.
-      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_open failed'
-    endif
-    if (verbose) then
-      if (io_is_in_append_mode) then
-        write(*,'(2a)') 'diamonds, write_trajectory: appending to ',filename
-      else
-        write(*,'(2a)') 'diamonds, write_trajectory: creating ',filename
-      endif
-    endif
-
-    if (io_is_in_append_mode) then
-      iret = nf_inq_dimid(ncid, 'i', i_dim)
-      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_inq_dimid i failed'
-      lonid = inq_varid(ncid, 'lon')
-      latid = inq_varid(ncid, 'lat')
-      yearid = inq_varid(ncid, 'year')
-      dayid = inq_varid(ncid, 'day')
-      uvelid = inq_varid(ncid, 'uvel')
-      vvelid = inq_varid(ncid, 'vvel')
-      uoid = inq_varid(ncid, 'uo')
-      void = inq_varid(ncid, 'vo')
-      uiid = inq_varid(ncid, 'ui')
-      viid = inq_varid(ncid, 'vi')
-      uaid = inq_varid(ncid, 'ua')
-      vaid = inq_varid(ncid, 'va')
-      mid = inq_varid(ncid, 'mass')
-      mbid = inq_varid(ncid, 'mass_of_bits')
-      hdid = inq_varid(ncid, 'heat_density')
-      did = inq_varid(ncid, 'thickness')
-      wid = inq_varid(ncid, 'width')
-      lid = inq_varid(ncid, 'length')
-      sshxid = inq_varid(ncid, 'ssh_x')
-      sshyid = inq_varid(ncid, 'ssh_y')
-      sstid = inq_varid(ncid, 'sst')
-      cnid = inq_varid(ncid, 'cn')
-      hiid = inq_varid(ncid, 'hi')
-      particle_numid = inq_varid(ncid, 'particle_num')
-    else
-      ! Dimensions
-      iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
-      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_def_dim i failed'
-
-      ! Variables
-      lonid = def_var(ncid, 'lon', NF_DOUBLE, i_dim)
-      latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
-      yearid = def_var(ncid, 'year', NF_INT, i_dim)
-      dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
-      uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
-      vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
-      uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
-      void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
-      uiid = def_var(ncid, 'ui', NF_DOUBLE, i_dim)
-      viid = def_var(ncid, 'vi', NF_DOUBLE, i_dim)
-      uaid = def_var(ncid, 'ua', NF_DOUBLE, i_dim)
-      vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
-      mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
-      mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
-      hdid = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
-      did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
-      wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
-      lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
-      sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
-      sshyid = def_var(ncid, 'ssh_y', NF_DOUBLE, i_dim)
-      sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
-      cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
-      hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
-      particle_numid = def_var(ncid, 'particle_num', NF_INT, i_dim)
-
-      ! Attributes
-      iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, 0)
-      iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 1, 1)
-      call put_att(ncid, lonid, 'long_name', 'longitude')
-      call put_att(ncid, lonid, 'units', 'degrees_E')
-      call put_att(ncid, latid, 'long_name', 'latitude')
-      call put_att(ncid, latid, 'units', 'degrees_N')
-      call put_att(ncid, yearid, 'long_name', 'year')
-      call put_att(ncid, yearid, 'units', 'years')
-      call put_att(ncid, dayid, 'long_name', 'year day')
-      call put_att(ncid, dayid, 'units', 'days')
-      call put_att(ncid, uvelid, 'long_name', 'zonal spped')
-      call put_att(ncid, uvelid, 'units', 'm/s')
-      call put_att(ncid, vvelid, 'long_name', 'meridional spped')
-      call put_att(ncid, vvelid, 'units', 'm/s')
-      call put_att(ncid, uoid, 'long_name', 'ocean zonal spped')
-      call put_att(ncid, uoid, 'units', 'm/s')
-      call put_att(ncid, void, 'long_name', 'ocean meridional spped')
-      call put_att(ncid, void, 'units', 'm/s')
-      !call put_att(ncid, uiid, 'long_name', 'ice zonal spped')
-      !call put_att(ncid, uiid, 'units', 'm/s')
-      !call put_att(ncid, viid, 'long_name', 'ice meridional spped')
-      !call put_att(ncid, viid, 'units', 'm/s')
-      !call put_att(ncid, uaid, 'long_name', 'atmos zonal spped')
-      !call put_att(ncid, uaid, 'units', 'm/s')
-      !call put_att(ncid, vaid, 'long_name', 'atmos meridional spped')
-      !call put_att(ncid, vaid, 'units', 'm/s')
-      !call put_att(ncid, mid, 'long_name', 'mass')
-      !call put_att(ncid, mid, 'units', 'kg')
-      !call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
-      !call put_att(ncid, mbid, 'units', 'kg')
-      !call put_att(ncid, hdid, 'long_name', 'heat_density')
-      !call put_att(ncid, hdid, 'units', 'J/kg')
-      !call put_att(ncid, did, 'long_name', 'thickness')
-      !call put_att(ncid, did, 'units', 'm')
-      !call put_att(ncid, wid, 'long_name', 'width')
-      !call put_att(ncid, wid, 'units', 'm')
-      !call put_att(ncid, lid, 'long_name', 'length')
-      !call put_att(ncid, lid, 'units', 'm')
-      !call put_att(ncid, sshxid, 'long_name', 'sea surface height gradient_x')
-      !call put_att(ncid, sshxid, 'units', 'non-dim')
-      !call put_att(ncid, sshyid, 'long_name', 'sea surface height gradient_y')
-      !call put_att(ncid, sshyid, 'units', 'non-dim')
-      !call put_att(ncid, sstid, 'long_name', 'sea surface temperature')
-      !call put_att(ncid, sstid, 'units', 'degrees_C')
-      !call put_att(ncid, cnid, 'long_name', 'sea ice concentration')
-      !call put_att(ncid, cnid, 'units', 'none')
-      !call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
-      !call put_att(ncid, hiid, 'units', 'm')
-      call put_att(ncid, particle_numid, 'long_name', 'particle id number')
-      call put_att(ncid, particle_numid, 'units', 'dimensionless')
-    endif
-
-    ! End define mode
-    iret = nf_enddef(ncid)
-         
-    ! Write variables
-    this=>traj4io
-    if (io_is_in_append_mode) then
-      iret = nf_inq_dimlen(ncid, i_dim, i)
-      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_inq_dimlen i failed'
-    else
-      i = 0
-    endif
-    do while (associated(this))
-      i=i+1
-      call put_double(ncid, lonid, i, this%lon)
-      call put_double(ncid, latid, i, this%lat)
-      call put_int(ncid, yearid, i, this%year)
-      call put_double(ncid, dayid, i, this%day)
-      call put_double(ncid, uvelid, i, this%uvel)
-      call put_double(ncid, vvelid, i, this%vvel)
-      call put_double(ncid, uoid, i, this%uo)
-      call put_double(ncid, void, i, this%vo)
-      !call put_double(ncid, uiid, i, this%ui)
-      !call put_double(ncid, viid, i, this%vi)
-      !call put_double(ncid, uaid, i, this%ua)
-      !call put_double(ncid, vaid, i, this%va)
-      !call put_double(ncid, mid, i, this%mass)
-      !call put_double(ncid, hdid, i, this%heat_density)
-      !call put_double(ncid, did, i, this%thickness)
-      !call put_double(ncid, wid, i, this%width)
-      !call put_double(ncid, lid, i, this%length)
-      !call put_double(ncid, sshxid, i, this%ssh_x)
-      !call put_double(ncid, sshyid, i, this%ssh_y)
-      !call put_double(ncid, sstid, i, this%sst)
-      !call put_double(ncid, cnid, i, this%cn)
-      !call put_double(ncid, hiid, i, this%hi)
-      call put_int(ncid, particle_numid, i, this%particle_num)
-      next=>this%next
-      deallocate(this)
-      this=>next
-    enddo
-
-    ! Finish up
-    iret = nf_close(ncid)
-    if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_close failed',mpp_pe(),filename
-
-  endif !(is_io_tile_root_pe .AND. associated(traj4io))
-  call mpp_clock_end(clock_trw)
-
+  
 end subroutine write_trajectory
 
 
