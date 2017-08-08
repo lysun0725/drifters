@@ -17,6 +17,7 @@ PROGRAM particle_driver
   use MOM_verticalGrid, only : verticalGrid_type, verticalGridInit
   use MOM, only : MOM_control_struct
   use MOM_state_initialization, only : MOM_initialize_state
+  use MOM_diag_mediator, only : diag_mediator_infrastructure_init
   use time_manager_mod, only: time_type, set_time, set_date, JULIAN, NOLEAP, NO_CALENDAR, set_calendar_type
   use ensemble_manager_mod, only : get_ensemble_size, ensemble_manager_init, ensemble_pelist_setup
   use mpp_mod, only : set_current_pelist => mpp_set_current_pelist
@@ -111,6 +112,9 @@ PROGRAM particle_driver
 
   call MOM_domains_init(Grid%domain,PF)
   call MOM_io_init(PF)
+
+  call diag_mediator_infrastructure_init()
+
   call hor_index_init(Grid%Domain, HI, PF, &
        local_indexing=.true.)
 
