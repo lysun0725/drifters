@@ -25,18 +25,20 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 use MOM_grid, only : ocean_grid_type
 
 use particles_framework, only: particles_gridded, xyt, particle, particles, buffer
-use particles_framework, only: pack_part_into_buffer2,unpack_part_from_buffer2
 use particles_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
 use particles_framework, only: find_cell,find_cell_by_search,count_parts,is_point_in_cell,pos_within_cell,append_posn
+!use particles_framework, only: count_bonds, form_a_bond, find_individual_particle
 use particles_framework, only: push_posn
 use particles_framework, only: add_new_part_to_list,destroy_particle
-use particles_framework, only: increase_ibuffer,increase_ibuffer_traj,grd_chksum2,grd_chksum3
+use particles_framework, only: increase_ibuffer,grd_chksum2,grd_chksum3
 use particles_framework, only: sum_mass,sum_heat,bilin
 !params !Niki: write a subroutine to get these
 use particles_framework, only: nclasses, buffer_width, buffer_width_traj
-use particles_framework, only: verbose, really_debug, debug, restart_input_dir
-use particles_framework, only: use_slow_find,generate_test_particles,print_part
+use particles_framework, only: verbose, really_debug, debug, restart_input_dir,make_calving_reproduce
+use particles_framework, only: ignore_ij_restart, use_slow_find,generate_test_particles,print_part
 use particles_framework, only: force_all_pes_traj
+use particles_framework, only: check_for_duplicates_in_parallel
+!use particles_framework, only: split_id, id_from_2_ints, generate_id
 
 implicit none ; private
 
@@ -96,30 +98,31 @@ end subroutine particles_io_init
 
 ! ##############################################################################
 
+!> Write an particle restart file
 subroutine write_restart(parts)
 ! Arguments
-type(particles), pointer :: parts
+type(particles), pointer :: parts !< particles container
 ! Local variables
+!type(bond), pointer :: current_bond
 integer :: i,j,id
 character(len=35) :: filename
+character(len=35) :: filename_bonds
 type(particle), pointer :: this=>NULL()
 integer :: stderrunit
 !I/O vars
 type(restart_file_type) :: parts_restart
-type(particle), pointer :: parts4io=>NULL()
-integer :: nparts
+type(restart_file_type) :: parts_bond_restart
+integer :: nparts, nbonds
+integer :: n_static_parts
+logical :: check_bond_quality
 type(particles_gridded), pointer :: grd
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
-                                   lon_old,      &
-                                   lat_old,      &
                                    uvel,         &
                                    vvel,         &
                                    mass,         &
                                    axn,          &
                                    ayn,          &
-                                   uvel_old,     &
-                                   vvel_old,     &
                                    bxn,          &
                                    byn,          &
                                    thickness,    &
@@ -131,210 +134,35 @@ real, allocatable, dimension(:) :: lon,          &
                                    start_mass,   &
                                    mass_scaling, &
                                    mass_of_bits, &
+                                   static_part,  &
                                    heat_density
 
-integer, allocatable, dimension(:) :: ine,       &
-                                      jne,       &
-                                      particle_num,       &
-                                      start_year
+integer, allocatable, dimension(:) :: ine,              &
+                                      jne,              &
+                                      id_cnt,           &
+                                      id_ij,            &
+                                      start_year,       &
+                                      first_id_cnt,     &
+                                      other_id_cnt,     &
+                                      first_id_ij,      &
+                                      other_id_ij,      &
+                                      first_part_jne,         &
+                                      first_part_ine,         &
+                                      other_part_jne,         &
+                                      other_part_ine
 
 
-!uvel_old, vvel_old, lon_old, lat_old, axn, ayn, bxn, byn added by Alon.
-  
-! Get the stderr unit number
- stderrunit=stderr()
+integer :: grdi, grdj
 
 
-  ! For convenience
-  grd=>parts%grd
  
-  !First add the bergs on the io_tile_root_pe (if any) to the I/O list
-   nparts = 0
-   if(associated(parts%first)) then
-        !bergs4io => bergs%first !This would modify the bergs and cause them to grow to include all bergs in the tile.
-        !Alternatively, create a new list, slow
-        this=>parts%first
-        do while (associated(this))
-           nparts = nparts +1
-           call add_new_part_to_list(parts4io, this)
-           this=>this%next
-        enddo
-   endif
-
-   allocate(lon(nparts))
-   allocate(lat(nparts))
-   allocate(lon_old(nparts))  !Alon
-   allocate(lat_old(nparts))  !Alon
-   allocate(uvel(nparts))
-   allocate(vvel(nparts))
-   allocate(mass(nparts))
-   allocate(axn(nparts))    !Alon
-   allocate(ayn(nparts))    !Alon
-   allocate(uvel_old(nparts)) !Alon
-   allocate(vvel_old(nparts)) !Alon
-   allocate(bxn(nparts)) !Alon
-   allocate(byn(nparts)) !Alon
-   allocate(thickness(nparts))
-   allocate(width(nparts))
-   allocate(length(nparts))
-   allocate(start_lon(nparts))
-   allocate(start_lat(nparts))
-   allocate(start_day(nparts))
-   allocate(start_mass(nparts))
-   allocate(mass_scaling(nparts))
-   allocate(mass_of_bits(nparts))
-   allocate(heat_density(nparts))
-
-   allocate(ine(nparts))
-   allocate(jne(nparts))
-   allocate(start_year(nparts))
-   allocate(particle_num(nparts))
-
-  call get_instance_filename("icebergs.res.nc", filename)
-  call set_domain(parts%grd%domain)
-  call register_restart_axis(parts_restart,filename,'i',nparts)
-  call set_meta_global(parts_restart,'file_format_major_version',ival=(/file_format_major_version/))
-  call set_meta_global(parts_restart,'file_format_minor_version',ival=(/file_format_minor_version/))
-  call set_meta_global(parts_restart,'time_axis',ival=(/0/))
-
-  !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
-
-  ! Define Variables
-  id = register_restart_field(parts_restart,filename,'lon',lon,longname='longitude',units='degrees_E')
-  id = register_restart_field(parts_restart,filename,'lat',lat,longname='latitude',units='degrees_N')
-  id = register_restart_field(parts_restart,filename,'lon_old',lon_old,longname='longitude',units='degrees_E') !Alon
-  id = register_restart_field(parts_restart,filename,'lat_old',lat_old,longname='latitude',units='degrees_N') !Alon
-  id = register_restart_field(parts_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
-  id = register_restart_field(parts_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
-  id = register_restart_field(parts_restart,filename,'mass',mass,longname='mass',units='kg')
-  id = register_restart_field(parts_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(parts_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2') !Alon
-  id = register_restart_field(parts_restart,filename,'uvel_old',uvel_old,longname='old explicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(parts_restart,filename,'vvel_old',vvel_old,longname='old explicit meridional acceleration',units='m/s^2') !Alon
-  id = register_restart_field(parts_restart,filename,'bxn',bxn,longname='inplicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(parts_restart,filename,'byn',byn,longname='implicit meridional acceleration',units='m/s^2') !Alon
-  id = register_restart_field(parts_restart,filename,'ine',ine,longname='i index',units='none')
-  id = register_restart_field(parts_restart,filename,'jne',jne,longname='j index',units='none')
-  id = register_restart_field(parts_restart,filename,'thickness',thickness,longname='thickness',units='m')
-  id = register_restart_field(parts_restart,filename,'width',width,longname='width',units='m')
-  id = register_restart_field(parts_restart,filename,'length',length,longname='length',units='m')
-  id = register_restart_field(parts_restart,filename,'start_lon',start_lon, &
-                                            longname='longitude of calving location',units='degrees_E')
-  id = register_restart_field(parts_restart,filename,'start_lat',start_lat, &
-                                            longname='latitude of calving location',units='degrees_N')
-  id = register_restart_field(parts_restart,filename,'start_year',start_year, &
-                                            longname='calendar year of calving event', units='years')
-  id = register_restart_field(parts_restart,filename,'particle_num',particle_num, &
-                                            longname='identification of the particle', units='dimensionless')
-  id = register_restart_field(parts_restart,filename,'start_day',start_day, &
-                                            longname='year day of calving event',units='days')
-  id = register_restart_field(parts_restart,filename,'start_mass',start_mass, &
-                                            longname='initial mass of particle',units='kg')
-  id = register_restart_field(parts_restart,filename,'mass_scaling',mass_scaling, &
-                                            longname='scaling factor for mass of particle',units='none')
-  id = register_restart_field(parts_restart,filename,'mass_of_bits',mass_of_bits, &
-                                            longname='mass of particle bits',units='kg')
-  id = register_restart_field(parts_restart,filename,'heat_density',heat_density, &
-                                            longname='heat density',units='J/kg')
-
-  ! Write variables
-
-  if(associated(parts%first)) this=>parts%first
-  do i=1,nparts
-    lon(i) = this%lon; lat(i) = this%lat
-    lon_old(i) = this%lon_old; lat_old(i) = this%lat_old  !Alon
-    uvel(i) = this%uvel; vvel(i) = this%vvel
-    ine(i) = this%ine; jne(i) = this%jne
-    mass(i) = this%mass; thickness(i) = this%thickness
-    axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
-    uvel_old(i) = this%uvel_old; vvel_old(i) = this%vvel_old !Added by Alon
-    bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
-    width(i) = this%width; length(i) = this%length
-    start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
-    start_year(i) = this%start_year; start_day(i) = this%start_day
-    particle_num(i) = this%particle_num; 
-    start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
-    mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
-    this=>this%next
-  enddo
-   
-
-  call save_restart(parts_restart)
-  call free_restart_type(parts_restart)
-
-  deallocate(              &
-             lon,          &
-             lat,          &
-             lon_old,      &
-             lat_old,      &
-             uvel,         &
-             vvel,         &
-             mass,         &
-             axn,          &
-             ayn,          &
-             uvel_old,     &
-             vvel_old,     &
-             bxn,          &
-             byn,          &
-             thickness,    &
-             width,        &
-             length,       &
-             start_lon,    &
-             start_lat,    &
-             start_day,    &
-             start_mass,   &
-             mass_scaling, &
-             mass_of_bits, &
-             heat_density )
-!axn, ayn, uvel_old, vvel_old, lat_old, lon_old, bxn, byn above added by Alon
-
-  deallocate(           &
-             ine,       &
-             jne,       &
-             particle_num,       &
-             start_year )
-
-
-  call nullify_domain()
-
-  ! Write stored ice
-  filename='RESTART/calving.res.nc'
-!  if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'diamonds, write_restart: writing ',filename
-
-!  call grd_chksum3(parts%grd, parts%grd%stored_ice, 'write stored_ice')
-!  call write_data(filename, 'stored_ice', parts%grd%stored_ice, parts%grd%domain)
-!  call grd_chksum2(parts%grd, parts%grd%stored_heat, 'write stored_heat')
-!  call write_data(filename, 'stored_heat', parts%grd%stored_heat, parts%grd%domain)
-  !call grd_chksum2(bergs%grd, bergs%grd%iceberg_counter_grd, 'write iceberg_counter_grd')
-!  call write_data(filename, 'iceberg_counter_grd', bergs%grd%iceberg_counter_grd, bergs%grd%domain)
-!  if (bergs%tau_calving>0.) then
-!    call grd_chksum2(bergs%grd, bergs%grd%rmean_calving, 'write mean calving')
-!    call write_data(filename, 'rmean_calving', bergs%grd%rmean_calving, bergs%grd%domain)
-!    call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'write mean calving_hflx')
-!    call write_data(filename, 'rmean_calving_hflx', bergs%grd%rmean_calving_hflx, bergs%grd%domain)
-!  endif
-  contains
-
-  function last_part(part)
-  ! Arguments
-  type(particle), pointer :: last_part, part
-  ! Local variables
-
-    last_part=>part
-    do while (associated(last_part%next))
-      last_part=>last_part%next
-    enddo
-
-  end function last_part
-
 end subroutine write_restart
 
 ! ##############################################################################
 
-subroutine read_restart_parts(parts,Grid,Time)
+subroutine read_restart_parts(parts,Time)
 ! Arguments
 type(particles), pointer :: parts
-type(ocean_grid_type), pointer :: Grid
 type(time_type), intent(in) :: Time
 
 !Local variables
@@ -345,6 +173,7 @@ logical :: multiPErestart  ! Not needed with new restart read; currently kept fo
 real :: lon0, lon1, lat0, lat1
 real :: pos_is_good, pos_is_good_all_pe
 character(len=33) :: filename, filename_base
+type(particles_gridded), pointer :: grd
 
 type(particle) :: localpart
 integer :: stderrunit, i, j, cnt, ij
@@ -357,7 +186,10 @@ real, allocatable,dimension(:) :: lon,	&
   ! Get the stderr unit number
   stderrunit=stderr()
 
-  ! Zero out nbergs_in_file
+  ! For convenience
+  grd=>parts%grd
+
+  ! Zero out nparts_in_file
   nparts_in_file = 0
 
   filename_base=trim(restart_input_dir)//'drifters.res.nc'
@@ -366,7 +198,7 @@ real, allocatable,dimension(:) :: lon,	&
 
   if (found_restart) then
     filename = filename_base
-    call get_field_size(filename,'i',siz, field_found=found, domain=Grid%Domain%mpp_domain) !Modify later: get_field_size has type(domain2D), but Grid%domain is type(MOM_domain_type)
+    call get_field_size(filename,'i',siz, field_found=found, domain=grd%domain) 
     nparts_in_file = 4 !siz(1)
 
     allocate(lon(nparts_in_file))
@@ -374,32 +206,32 @@ real, allocatable,dimension(:) :: lon,	&
     allocate(depth(nparts_in_file))
     allocate(id(nparts_in_file))
 
-    call read_unlimited_axis(filename,'lon',lon,domain=Grid%Domain%mpp_domain)
-    call read_unlimited_axis(filename,'lat',lat,domain=Grid%Domain%mpp_domain)
-    call read_unlimited_axis(filename,'depth',depth,domain=Grid%Domain%mpp_domain)
-    call read_unlimited_axis(filename,'id',id,domain=Grid%Domain%mpp_domain)
+    call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
+    call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
+    call read_unlimited_axis(filename,'depth',depth,domain=grd%domain)
+    call read_unlimited_axis(filename,'id',id,domain=grd%domain)
   end if ! found_restart ln 569
 
   ! Find approx outer bounds for tile
-  lon0=minval( Grid%geolonT(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
-  lon1=maxval( Grid%geolonT(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
-  lat0=minval( Grid%geolatT(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
-  lat1=maxval( Grid%geolatT(Grid%isc-1:Grid%iec,Grid%jsc-1:Grid%jec) )
+  lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+  lon1=maxval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+  lat0=minval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+  lat1=maxval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
 
   do k=1, nparts_in_file
     localpart%lon=lon(k)
     localpart%lat=lat(k)
 
     if (use_slow_find) then
-      lres=find_cell(Grid, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
+      lres=find_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
     else
-      lres=find_cell_by_search(Grid, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
+      lres=find_cell_by_search(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
     endif
 
     if (really_debug) then
       write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'diamonds, read_restart_part: part ',k,' is at ',localpart%lon,localpart%lat,&
            & ' on PE ',mpp_pe()
-      write(stderrunit,*) 'diamonds, read_restart_bergs: lres = ',lres
+      write(stderrunit,*) 'diamonds, read_restart_parts: lres = ',lres
     endif
   end do ! ln 650
 
@@ -416,6 +248,8 @@ end subroutine read_restart_parts
 ! ##############################################################################
 
 subroutine write_trajectory(trajectory)
+
+use particles_framework, only: increase_ibuffer_traj
 ! Arguments
 type(xyt), pointer :: trajectory
 ! Local variables

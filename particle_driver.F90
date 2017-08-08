@@ -58,6 +58,10 @@ PROGRAM particle_driver
   integer :: is, ie, js, je, isd, ied, jsd, jed, IscB, IecB, JscB, JecB, IsdB, IedB, JsdB, JedB
   integer :: ierr, io_status, n, nz, unit
 
+  ! Modify these later
+  real :: dt=0.1
+  integer :: axes(2) !< Diagnostic axes
+
   namelist /particle_driver_nml/ date_init, calendar, months, days, hours, minutes, seconds
 
   call MOM_infra_init(); call io_infra_init()
@@ -152,7 +156,7 @@ PROGRAM particle_driver
 
   node=>drifters
   grd=>Grid
-  call particles_init( node, grd, Time)
+  call particles_init( node, grd, Time, dt, axes)
 
 
 !  call particles_run(parts,time,grd%uo,grd%vo) ! Run the particles model
