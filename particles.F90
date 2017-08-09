@@ -22,6 +22,8 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 use diag_manager_mod, only: register_diag_field, register_static_field, send_data
 use diag_manager_mod, only: diag_axis_init
 
+use MOM, only : MOM_control_struct
+
 use particles_framework, only: particles_framework_init
 use particles_framework, only: particles_gridded, xyt, particle, particles, buffer
 use particles_framework, only: verbose, really_debug,debug
@@ -72,13 +74,14 @@ real, parameter :: Cd_iv=0.9 !< (Vertical) Drag coefficient between parts and se
 contains
 
 ! ##############################################################################
-subroutine particles_init(parts, Grid, Time, dt, axes)
+subroutine particles_init(parts, Grid, Time, MOM_CS, dt, axes)
 
  use particles_io, only: read_restart_parts, particles_io_init
 
  type(particles), pointer :: parts
  type(ocean_grid_type), pointer :: Grid !< Grid type from parent model
  type(time_type), intent(in) :: Time !< Time type from parent model
+ type(MOM_control_struct), pointer, intent(in) :: MOM_CS !< Pointer to a MOM control structure
  real, intent(in)            :: dt !< particle timestep in seconds
  integer, dimension(2), intent(in) :: axes !< diagnostic axis ids
 
@@ -102,7 +105,7 @@ subroutine particles_init(parts, Grid, Time, dt, axes)
 
  call mpp_clock_begin(parts%clock_ior)
  call particles_io_init(parts,io_layout)
- call read_restart_parts(parts,Time)
+ call read_restart_parts(parts,Time, MOM_CS)
  call parts_chksum(parts, 'read_restart_particles')
  call mpp_clock_end(parts%clock_ior)
 
@@ -553,47 +556,6 @@ end subroutine Hexagon_into_quadrants_using_triangles
 
 ! ##############################################################################
 
-subroutine interp_flds(grd, i, j, xi, yj, uo, vo)
-! Arguments
- type(particles_gridded), pointer :: grd
- integer, intent(in) :: i, j
- real, intent(in) :: xi, yj
- real, intent(out) :: uo, vo
- ! Local variables
- real :: cos_rot, sin_rot
- real :: hxm, hxp
-
-
- cos_rot=bilin(grd, grd%cos, i, j, xi, yj) ! If true, uses the inverted bilin function
- sin_rot=bilin(grd, grd%sin, i, j, xi, yj)
-
- uo=bilin(grd, grd%uo, i, j, xi, yj)
- vo=bilin(grd, grd%vo, i, j, xi, yj)
-
- ! Rotate vectors from local grid to lat/lon coordinates
- call rotate(uo, vo, cos_rot, sin_rot)
-
-
-contains
-
-
- subroutine rotate(u, v, cos_rot, sin_rot)
-   ! Arguments
-   real, intent(inout) :: u, v
-   real, intent(in) :: cos_rot, sin_rot
-   ! Local variables
-   real :: u_old, v_old
-
-   u_old=u
-   v_old=v
-   u=cos_rot*u_old+sin_rot*v_old
-   v=cos_rot*v_old-sin_rot*u_old
-
- end subroutine rotate
-
-end subroutine interp_flds
-
-!######################################################################################
 
 subroutine accel(parts, part, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, debug_flag) !Saving  acceleration for Verlet, Adding Verlet flag - Alon  MP1
 !subroutine accel(parts, part, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag) !old version commmented out by Alon
@@ -1492,28 +1454,11 @@ subroutine create_gridded_particles_fields(parts)
 type(particles), pointer :: parts !< Container for all types and memory
 ! Local variables
 type(particles_gridded), pointer :: grd
-type(particle), pointer :: this
-integer i,j
-integer :: grdi, grdj
-real :: Hocean, Dn,Tn,dvo, mass_tmp
-real :: ustar_h, ustar
-real :: orientation
-real :: ave_thickness, ave_draft
-real, dimension(parts%grd%isd:parts%grd%ied,parts%grd%jsd:parts%grd%jed)  :: spread_mass_tmp
-real :: tmp
+
+
 
   ! For convenience
   grd=>parts%grd
-
-  spread_mass_tmp(:,:)=0. !Initializing temporary variable to use in particle melt calculation
-
-  !Special case for particles not decaying, but mass diffence being used for melt rates
-  if ((parts%find_melt_using_spread_mass) .and.  (parts%particle_melt_without_decay)) then
-    call sum_up_spread_fields(parts, spread_mass_tmp(grd%isc:grd%iec,grd%jsc:grd%jec),'mass')
-  endif
-
-  !Loop through particles and spread mass on ocean
-  call calculate_mass_on_ocean(parts, with_diagnostics=.true.)
 
   !Finding the spread fields
   if ((grd%id_spread_uvel>0)  .or. (parts%pass_fields_to_ocean_model)) then
@@ -1524,68 +1469,7 @@ real :: tmp
     grd%spread_vvel(:,:)=0.
     call sum_up_spread_fields(parts, grd%spread_vvel(grd%isc:grd%iec,grd%jsc:grd%jec), 'Vvel')
   endif
-  if ( (grd%id_spread_area>0)  .or. (parts%pass_fields_to_ocean_model)) then
-    grd%spread_area(:,:)=0.
-    call sum_up_spread_fields(parts, grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec), 'area')
-  endif
-  !Always find spread_mass since it is used for so many things.
-  grd%spread_mass(:,:)=0.
-    call sum_up_spread_fields(parts, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),'mass')
 
-  !Using spread_mass_to_ocean to calculate melt rates (if this option is chosen)
-  if (parts%find_melt_using_spread_mass) then
-    if (.not. parts%particle_melt_without_decay) &
-         spread_mass_tmp(grd%isc:grd%iec,grd%jsc:grd%jec)= grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
-    do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
-      if (grd%area(i,j)>0.0) then
-        grd%floating_melt(i,j)=max((grd%spread_mass_old(i,j) - spread_mass_tmp(i,j))/(parts%dt),0.0)
-      else
-        grd%floating_melt(i,j)=0.0
-      endif
-    enddo ;enddo
-    grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*HLF !Not 100% sure this is correct.
-  endif
-
-  ! Dividing the gridded particle momentum diagnostic by the particle mass to get velocities
-  if ((grd%id_u_particle>0) .or. (grd%id_v_particle>0)) then
-    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec
-      if (grd%mass(i,j)>0.) then
-        if (grd%id_u_particle>0) &
-          grd%u_particle(i,j)=grd%u_particle(i,j)/grd%mass(i,j)
-        if (grd%id_v_particle>0) &
-          grd%v_particle(i,j)=grd%v_particle(i,j)/grd%mass(i,j)
-      else
-        if (grd%id_u_particle>0)  grd%u_particle(i,j)=0.
-        if (grd%id_v_particle>0)  grd%v_particle(i,j)=0.
-      endif
-    enddo; enddo
-  endif
-
-  !Calculating ustar_particle (gridded)
-  grd%ustar_particle(:,:)=0.
-  if  ((grd%id_ustar_particle>0) .or. (parts%pass_fields_to_ocean_model)) then   !Update diagnostic of particle mass spread on ocean
-    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec
-      dvo=sqrt((grd%spread_uvel(i,j)-grd%uo(i,j))**2+(grd%spread_vvel(i,j)-grd%vo(i,j))**2)
-      ustar = sqrt(parts%cdrag_particles*(dvo**2  + parts%utide_particles**2))
-      ustar_h = max(parts%ustar_particles_bg, ustar)
-      if (grd%spread_area(i,j) ==0.0) ustar_h=0.
-        grd%ustar_particle(i,j)=ustar_h
-    enddo; enddo
-  endif
-
-  !Only allowing melt in ocean above a minimum cutoff thickness
-  if (parts%apply_thickness_cutoff_to_gridded_melt) then
-    do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
-      if ((parts%melt_cutoff >=0.) .and. (grd%spread_area(i,j)>0.)) then
-        ave_thickness=grd%spread_mass(i,j)/(grd%spread_area(i,j)*parts%rho_parts)
-        ave_draft=ave_thickness*(parts%rho_parts/rho_seawater)
-        if ((grd%ocean_depth(i,j)-ave_draft) < parts%melt_cutoff) then
-          grd%floating_melt(i,j)=0.0
-          grd%calving_hflx(i,j)=0.0
-        endif
-      endif
-    enddo ;enddo
-  endif
 end subroutine create_gridded_particles_fields
 
 end module particles_mod

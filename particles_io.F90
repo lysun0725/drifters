@@ -25,6 +25,7 @@ use fms_mod,    only : clock_flag_default
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 use MOM_grid, only : ocean_grid_type
+use MOM, only      : MOM_control_struct
 
 use particles_framework, only: particles_gridded, xyt, particle, particles, buffer
 use particles_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
@@ -49,7 +50,7 @@ include 'netcdf.inc'
 
 public particles_io_init
 public read_restart_parts, write_restart,write_trajectory
-
+public interp_flds
 
 !Local Vars
 integer, parameter :: file_format_major_version=0
@@ -165,10 +166,11 @@ end subroutine write_restart
 
 ! ##############################################################################
 
-subroutine read_restart_parts(parts,Time)
+subroutine read_restart_parts(parts,Time, MOM_CS)
 ! Arguments
 type(particles), pointer :: parts
 type(time_type), intent(in) :: Time
+type(MOM_control_struct), pointer, intent(in) :: MOM_CS
 
 !Local variables
 integer :: k, siz(4), nparts_in_file, nparts_read
@@ -194,6 +196,9 @@ real, allocatable,dimension(:) :: lon,	&
   ! For convenience
   grd=>parts%grd
 
+  grd%uo=>MOM_CS%u(:,:,1)
+  grd%vo=>MOM_CS%v(:,:,1)
+
   ! Zero out nparts_in_file
   nparts_in_file = 0
 
@@ -203,7 +208,7 @@ real, allocatable,dimension(:) :: lon,	&
 
   if (found_restart) then
     filename = filename_base
-    call get_field_size(filename,'lon',siz, field_found=found, domain=grd%domain) 
+    call get_field_size(filename,'i',siz, field_found=found, domain=grd%domain) 
     nparts_in_file = siz(1)
     print *,'NPARTS= ',nparts_in_file
     allocate(lon(nparts_in_file))
@@ -214,7 +219,7 @@ real, allocatable,dimension(:) :: lon,	&
     call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
     call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
     call read_unlimited_axis(filename,'depth',depth,domain=grd%domain)
-    call read_unlimited_axis(filename,'id',id,domain=grd%domain)
+    call read_unlimited_axis(filename,'drifter_num',id,domain=grd%domain)
   end if ! found_restart ln 569
 
   ! Find approx outer bounds for tile
@@ -237,6 +242,12 @@ real, allocatable,dimension(:) :: lon,	&
       write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'diamonds, read_restart_part: part ',k,' is at ',localpart%lon,localpart%lat,&
            & ' on PE ',mpp_pe()
       write(stderrunit,*) 'diamonds, read_restart_parts: lres = ',lres
+    endif
+
+    if (lres) then ! True if the particle resides on the current processors computational grid
+      lres=pos_within_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne, localpart%xi, localpart%yj)
+      call interp_flds(grd,localpart%ine,localpart%jne,localpart%xi,localpart%yj,localpart%uvel, localpart%vvel)
+      call add_new_part_to_list(parts%list(localpart%ine,localpart%jne)%first, localpart)
     endif
   end do ! ln 650
 
@@ -496,5 +507,46 @@ logical function find_restart_file(filename, actual_file, multiPErestart, tile_i
 
 end function find_restart_file
 
+subroutine interp_flds(grd, i, j, xi, yj, uo, vo)
+! Arguments
+ type(particles_gridded), pointer :: grd
+ integer, intent(in) :: i, j
+ real, intent(in) :: xi, yj
+ real, intent(out) :: uo, vo
+ ! Local variables
+ real :: cos_rot, sin_rot
+ real :: hxm, hxp
+
+
+ cos_rot=bilin(grd, grd%cos, i, j, xi, yj) ! If true, uses the inverted bilin function
+ sin_rot=bilin(grd, grd%sin, i, j, xi, yj)
+
+ uo=bilin(grd, grd%uo, i, j, xi, yj)
+ vo=bilin(grd, grd%vo, i, j, xi, yj)
+
+ ! Rotate vectors from local grid to lat/lon coordinates
+ call rotate(uo, vo, cos_rot, sin_rot)
+
+
+contains
+
+
+ subroutine rotate(u, v, cos_rot, sin_rot)
+   ! Arguments
+   real, intent(inout) :: u, v
+   real, intent(in) :: cos_rot, sin_rot
+   ! Local variables
+   real :: u_old, v_old
+
+   u_old=u
+   v_old=v
+   u=cos_rot*u_old+sin_rot*v_old
+   v=cos_rot*v_old-sin_rot*u_old
+
+ end subroutine rotate
+
+end subroutine interp_flds
+
+!######################################################################################
 
 end module

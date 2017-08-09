@@ -37,7 +37,7 @@ PROGRAM particle_driver
   type(hor_index_type)   :: HI ! A hor_index_type for array extents
   type(particles), target  :: drifters
   type(particles), pointer :: node=>NULL() !<pointer to an element in drifters list
-  type(ocean_grid_type),  pointer :: grd
+  type(ocean_grid_type),  pointer :: ocn_grd
   type(time_type) :: time, time_start, time_start_segment, time_end, time_in
   real :: time_step
   character(len=128) :: history_file
@@ -175,8 +175,12 @@ PROGRAM particle_driver
 
   call destroy_dyn_horgrid(dG)
   node=>drifters
-  grd=>Grid
-  call particles_init( node, grd, Time, dt, axes)
+  ocn_grd=>Grid
+  
+  do n=1,nPEs_ocn
+    CS=>CSp(n)
+    call particles_init( node, ocn_grd, Time, CS, dt, axes)
+  enddo
 
   do n=1,nPEs_ocn
     CS=>CSp(n)
