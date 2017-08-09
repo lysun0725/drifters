@@ -622,9 +622,9 @@ real :: Total_mass  !Added by Alon
 
   !For SIS not to change answers
   if(present(fractional_area)) then
-    if(fractional_area) grd%area(is:ie,js:je)=ice_area(:,:) *(4.*pi*radius*radius)
+    if(fractional_area) grd%area(is:ie,js:je)=ice_area(is:ie,js:je) *(4.*pi*radius*radius)
   endif
-  if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(:,:)
+  if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(is:ie,js:je)
 
   ! Copy data declared on ice model data domain
   is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
