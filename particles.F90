@@ -75,13 +75,13 @@ contains
 subroutine particles_init(parts, Grid, Time, dt, axes)
 
  use particles_io, only: read_restart_parts, particles_io_init
- 
+
  type(particles), pointer :: parts
  type(ocean_grid_type), pointer :: Grid !< Grid type from parent model
  type(time_type), intent(in) :: Time !< Time type from parent model
  real, intent(in)            :: dt !< particle timestep in seconds
  integer, dimension(2), intent(in) :: axes !< diagnostic axis ids
- 
+
  integer :: io_layout(2)
  integer :: stdlogunit, stderrunit
  integer :: gni, gnj ! Global extent of ocean grid
@@ -569,11 +569,11 @@ subroutine interp_flds(grd, i, j, xi, yj, uo, vo)
 
  uo=bilin(grd, grd%uo, i, j, xi, yj)
  vo=bilin(grd, grd%vo, i, j, xi, yj)
-  
+
  ! Rotate vectors from local grid to lat/lon coordinates
  call rotate(uo, vo, cos_rot, sin_rot)
 
- 
+
 contains
 
 
@@ -637,6 +637,9 @@ subroutine particles_run(parts, time, uo, vo, stagger)
   real, dimension(:,:), allocatable :: iCount
   integer :: stderrunit
 
+
+  print *,' In particles_run 0001'
+
   ! Get the stderr unit number
   stderrunit = stderr()
 
@@ -649,6 +652,8 @@ subroutine particles_run(parts, time, uo, vo, stagger)
 
   !Initializing _on_ocean_fields
   grd%Uvel_on_ocean(:,:,:)=0. ;   grd%Vvel_on_ocean(:,:,:)=0.
+
+  print *,' In particles_run 0002'
 
   ! Manage time
   call get_date(time, iyr, imon, iday, ihr, imin, isec)
@@ -674,6 +679,7 @@ subroutine particles_run(parts, time, uo, vo, stagger)
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
        ' yr,yrdy=', parts%current_year, parts%current_yearday
 
+  print *,' In particles_run 0003'
 
  !call sanitize_field(grd%calving,1.e20)
 
@@ -700,6 +706,7 @@ subroutine particles_run(parts, time, uo, vo, stagger)
     call error_mesg('diamonds, particle_run', 'Unrecognized value of stagger!', FATAL)
   endif
 
+  print *,' In particles_run 0004'
   call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
 
   ! Make sure that gridded values agree with mask  (to get ride of NaN values)
@@ -788,7 +795,7 @@ subroutine evolve_particles(parts)
   integer :: stderrunit
   logical :: bounced, interactive_particles_on, Runge_not_Verlet
 
-  
+
 
 end subroutine evolve_particles
 

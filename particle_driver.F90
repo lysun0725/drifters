@@ -22,7 +22,7 @@ PROGRAM particle_driver
   use ensemble_manager_mod, only : get_ensemble_size, ensemble_manager_init, ensemble_pelist_setup
   use mpp_mod, only : set_current_pelist => mpp_set_current_pelist
   use particles_mod, only : particles_init
-!  use particles_mod, only : particles_run, particles_save_restart
+  use particles_mod, only : particles_run !, particles_save_restart
 !  use particles_io, only : read_restart_particles
   use particles_framework, only : particle, particles !, particles_gridded
 !  use particles_extra, only : particles_framework_ini, read_restart_particles
@@ -178,8 +178,11 @@ PROGRAM particle_driver
   grd=>Grid
   call particles_init( node, grd, Time, dt, axes)
 
-
-!  call particles_run(parts,time,grd%uo,grd%vo) ! Run the particles model
+  do n=1,nPEs_ocn
+    CS=>CSp(n)
+    CS%GV=>GV
+    call particles_run(node,time,CS%u(:,:,1),CS%v(:,:,1)) ! Run the particles model
+  enddo
 
 !  call particles_save_restart(parts)
 
