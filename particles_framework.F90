@@ -175,7 +175,7 @@ end type particles_gridded
 type :: xyt
   real :: lon, lat, day
   real :: uvel, vvel
-  real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lat_old, lon_old  !Explicit and implicit accelerations !Alon 
+  real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lat_old, lon_old  !Explicit and implicit accelerations !Alon
   real :: uo, vo
   integer :: year, particle_num
   type(xyt), pointer :: next=>null()
@@ -185,7 +185,7 @@ type :: particle
   type(particle), pointer :: prev=>null(), next=>null()
   ! State variables (specific to the particle, needed for restarts)
   real :: lon, lat, uvel, vvel, mass, thickness, width, length
-  real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lon_old, lat_old !Explicit and implicit accelerations !Alon 
+  real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lon_old, lat_old !Explicit and implicit accelerations !Alon
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
   real :: mass_of_bits, heat_density
   integer :: start_year
@@ -223,7 +223,7 @@ type :: linked_list
 end type linked_list
 
 !> Container for all types and memory
-type :: particles !; private 
+type :: particles !; private
   type(particles_gridded), pointer :: grd !< Container with all gridded data
   type(linked_list), dimension(:,:), allocatable :: list !< Linked list of particles
   type(xyt), pointer :: trajectories=>null() !< A linked list for detached segments of trajectories
@@ -599,9 +599,9 @@ real :: Total_mass  !Added by Alon
  !write(stderrunit,*) 'diamonds: copying grid'
   ! Copy data declared on ice model computational domain
   is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
-  grd%lon(is:ie,js:je)=ice_lon(:,:)
-  grd%lat(is:ie,js:je)=ice_lat(:,:)
-  grd%area(is:ie,js:je)=ice_area(:,:) !sis2 has *(4.*pi*radius*radius)
+  grd%lon(is:ie,js:je)=ice_lon(is:ie,js:je)
+  grd%lat(is:ie,js:je)=ice_lat(is:ie,js:je)
+  grd%area(is:ie,js:je)=ice_area(is:ie,js:je) !sis2 has *(4.*pi*radius*radius)
 
   !!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!
   !if (mpp_pe().eq.5) then
@@ -627,12 +627,12 @@ real :: Total_mass  !Added by Alon
   if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(:,:)
 
   ! Copy data declared on ice model data domain
-  is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
-  grd%dx(is:ie,js:je)=ice_dx(:,:)
-  grd%dy(is:ie,js:je)=ice_dy(:,:)
-  grd%msk(is:ie,js:je)=ice_wet(:,:)
-  grd%cos(is:ie,js:je)=cos_rot(:,:)
-  grd%sin(is:ie,js:je)=sin_rot(:,:)
+  is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
+  grd%dx(is:ie,js:je)=ice_dx(is:ie,js:je)
+  grd%dy(is:ie,js:je)=ice_dy(is:ie,js:je)
+  grd%msk(is:ie,js:je)=ice_wet(is:ie,js:je)
+  grd%cos(is:ie,js:je)=cos_rot(is:ie,js:je)
+  grd%sin(is:ie,js:je)=sin_rot(is:ie,js:je)
 
   call mpp_update_domains(grd%lon, grd%domain, position=CORNER)
   call mpp_update_domains(grd%lat, grd%domain, position=CORNER)
@@ -2745,7 +2745,7 @@ type(xyt), pointer :: new_posn
 end subroutine push_posn
 
 subroutine append_posn(trajectory, posn_vals)
-! This routine appends a new position leaf to the end of the given trajectory 
+! This routine appends a new position leaf to the end of the given trajectory
 ! Arguments
 type(xyt), pointer :: trajectory
 type(xyt) :: posn_vals
@@ -2876,7 +2876,7 @@ logical :: explain=.false.
     find_cell_by_search=.true.
     return
   endif
-    
+
   do icnt=1, 1*(ie-is+je-js)
     io=i; jo=j
 
@@ -2919,7 +2919,7 @@ logical :: explain=.false.
       find_cell_by_search=.true.
       return
     endif
-    
+
     if ((i==io.and.j==jo) &
         .and. .not.find_better_min(grd, x, y, 3, i, j) &
        ) then
@@ -2967,7 +2967,7 @@ logical :: explain=.false.
 
   contains
 
-! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
   real function dcost(x1, y1, x2, y2)
   ! Arguments
@@ -2980,7 +2980,7 @@ logical :: explain=.false.
     dcost=(x2-x1m)**2+(y2-y1)**2
   end function dcost
 
-! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
   logical function find_better_min(grd, x, y, w, oi, oj)
   ! Arguments
@@ -3010,7 +3010,7 @@ logical :: explain=.false.
 
   end function find_better_min
 
-! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
   logical function find_cell_loc(grd, x, y, is, ie, js, je, w, oi, oj)
   ! Arguments
@@ -3165,41 +3165,41 @@ integer :: stderrunit
   ylo=min( grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i-1,j), grd%lat(i,j) )
   yhi=max( grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i-1,j), grd%lat(i,j) )
   if (y.lt.ylo .or. y.gt.yhi) return
-  
+
   if (grd%lat(i,j).gt.89.999) then
     is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
                                         grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
                                         grd%lon(i  ,j-1),grd%lat(i  ,j  ), &
                                         grd%lon(i-1,j  ),grd%lat(i  ,j  ), &
                                         grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
-                                        x, y, explain=explain) 
+                                        x, y, explain=explain)
   elseif (grd%lat(i-1,j).gt.89.999) then
     is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
                                         grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
                                         grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
                                         grd%lon(i  ,j  ),grd%lat(i-1,j  ), &
                                         grd%lon(i-1,j-1),grd%lat(i-1,j  ), &
-                                        x, y, explain=explain) 
+                                        x, y, explain=explain)
   elseif (grd%lat(i-1,j-1).gt.89.999) then
     is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j  ),grd%lat(i-1,j-1), &
                                         grd%lon(i  ,j-1),grd%lat(i-1,j-1), &
                                         grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
                                         grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
                                         grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
-                                        x, y, explain=explain) 
+                                        x, y, explain=explain)
   elseif (grd%lat(i,j-1).gt.89.999) then
     is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
                                         grd%lon(i-1,j-1),grd%lat(i  ,j-1), &
                                         grd%lon(i  ,j  ),grd%lat(i  ,j-1), &
                                         grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
                                         grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
-                                        x, y, explain=explain) 
+                                        x, y, explain=explain)
   else
   is_point_in_cell=sum_sign_dot_prod4(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
                                       grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
                                       grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
                                       grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
-                                      x, y, explain=explain) 
+                                      x, y, explain=explain)
   endif
 
 end function is_point_in_cell
@@ -3624,7 +3624,7 @@ character(len=*) :: label
   ! external forcing
   call grd_chksum2(grd, grd%uo, 'uo')
   call grd_chksum2(grd, grd%vo, 'vo')
-  
+
   ! static
   call grd_chksum2(grd, grd%lon, 'lon')
   call grd_chksum2(grd, grd%lat, 'lat')
@@ -4041,7 +4041,7 @@ real, intent(in) :: yj !< Non-dimensional y-position
   endif
 end function is_point_within_xi_yj_bounds
 
-! ############################################################################## 
+! ##############################################################################
 !> Modulo value of x in an interval [y-(Lx/2)  y+(Lx/2)]
 !!
 !! Gives the modulo value of x in an interval [y-(Lx/2)  y+(Lx/2)]  , modulo Lx
