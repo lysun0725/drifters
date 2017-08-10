@@ -196,9 +196,6 @@ real, allocatable,dimension(:) :: lon,	&
   ! For convenience
   grd=>parts%grd
 
-  grd%uo=>MOM_CS%u(:,:,1)
-  grd%vo=>MOM_CS%v(:,:,1)
-
   ! Zero out nparts_in_file
   nparts_in_file = 0
 
