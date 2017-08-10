@@ -3826,7 +3826,7 @@ integer :: grdi, grdj
       fld(i,19) = float(ipart) !Changed from 11 to 19 by Alon
       icnt(this%ine,this%jne)=icnt(this%ine,this%jne)+1
       fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) ) !*float( i )
-      grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)+log(this%mass)
+      grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)!+log(this%mass) !LUYU: we assume zero mass for now.
       ichk5=ichk5+ipart
       this=>this%next
     enddo
