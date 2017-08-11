@@ -42,7 +42,7 @@ use particles_framework, only: verbose, really_debug, debug, restart_input_dir,m
 use particles_framework, only: ignore_ij_restart, use_slow_find,generate_test_particles!,print_part
 use particles_framework, only: force_all_pes_traj
 !use particles_framework, only: check_for_duplicates_in_parallel
-!use particles_framework, only: split_id, id_from_2_ints, generate_id
+use particles_framework, only: split_id!, id_from_2_ints, generate_id
 
 implicit none ; private
 
@@ -50,7 +50,6 @@ include 'netcdf.inc'
 
 public particles_io_init
 public read_restart_parts, write_restart,write_trajectory
-public interp_flds
 
 !Local Vars
 integer, parameter :: file_format_major_version=0
@@ -160,6 +159,170 @@ integer, allocatable, dimension(:) :: ine,              &
 
 integer :: grdi, grdj
 
+! Get the stderr unit number
+ stderrunit=stderr()
+
+
+  ! For convenience
+  grd=>parts%grd
+
+  !First add the parts on the io_tile_root_pe (if any) to the I/O list
+  nparts = 0
+  do grdj = parts%grd%jsc,parts%grd%jec ; do grdi = parts%grd%isc,parts%grd%iec
+    this=>parts%list(grdi,grdj)%first
+    do while (associated(this))
+      nparts = nparts +1
+      this=>this%next
+    enddo
+  enddo ; enddo
+
+   allocate(lon(nparts))
+   allocate(lat(nparts))
+   allocate(uvel(nparts))
+   allocate(vvel(nparts))
+   allocate(mass(nparts))
+   allocate(axn(nparts))    !Alon
+   allocate(ayn(nparts))    !Alon
+   allocate(bxn(nparts)) !Alon
+   allocate(byn(nparts)) !Alon
+   allocate(thickness(nparts))
+   allocate(width(nparts))
+   allocate(length(nparts))
+   allocate(start_lon(nparts))
+   allocate(start_lat(nparts))
+   allocate(start_day(nparts))
+   allocate(start_mass(nparts))
+   allocate(mass_scaling(nparts))
+   allocate(mass_of_bits(nparts))
+   allocate(heat_density(nparts))
+   allocate(static_part(nparts))
+
+   allocate(ine(nparts))
+   allocate(jne(nparts))
+   allocate(start_year(nparts))
+   allocate(id_cnt(nparts))
+   allocate(id_ij(nparts))
+
+
+  call get_instance_filename("drifters.res.nc", filename)
+  call set_domain(parts%grd%domain)
+  call register_restart_axis(parts_restart,filename,'i',nparts)
+  call set_meta_global(parts_restart,'file_format_major_version',ival=(/file_format_major_version/))
+  call set_meta_global(parts_restart,'file_format_minor_version',ival=(/file_format_minor_version/))
+  call set_meta_global(parts_restart,'time_axis',ival=(/0/))
+
+  !Now start writing in the io_tile_root_pe if there are any parts in the I/O list
+
+  ! Define Variables
+  id = register_restart_field(parts_restart,filename,'lon',lon,longname='longitude',units='degrees_E')
+  id = register_restart_field(parts_restart,filename,'lat',lat,longname='latitude',units='degrees_N')
+  id = register_restart_field(parts_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
+  id = register_restart_field(parts_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
+  id = register_restart_field(parts_restart,filename,'mass',mass,longname='mass',units='kg')
+  if (.not. parts%Runge_not_Verlet) then
+    id = register_restart_field(parts_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2')
+    id = register_restart_field(parts_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2')
+    id = register_restart_field(parts_restart,filename,'bxn',bxn,longname='inplicit zonal acceleration',units='m/s^2')
+    id = register_restart_field(parts_restart,filename,'byn',byn,longname='implicit meridional acceleration',units='m/s^2')
+  endif
+  id = register_restart_field(parts_restart,filename,'ine',ine,longname='i index',units='none')
+  id = register_restart_field(parts_restart,filename,'jne',jne,longname='j index',units='none')
+  id = register_restart_field(parts_restart,filename,'thickness',thickness,longname='thickness',units='m')
+  id = register_restart_field(parts_restart,filename,'width',width,longname='width',units='m')
+  id = register_restart_field(parts_restart,filename,'length',length,longname='length',units='m')
+  id = register_restart_field(parts_restart,filename,'start_lon',start_lon, &
+                                            longname='longitude of calving location',units='degrees_E')
+  id = register_restart_field(parts_restart,filename,'start_lat',start_lat, &
+                                            longname='latitude of calving location',units='degrees_N')
+  id = register_restart_field(parts_restart,filename,'start_year',start_year, &
+                                            longname='calendar year of calving event', units='years')
+  id = register_restart_field(parts_restart,filename,'id_cnt',id_cnt, &
+                                            longname='counter component of particle id', units='dimensionless')
+  id = register_restart_field(parts_restart,filename,'id_ij',id_ij, &
+                                            longname='position component of particle id', units='dimensionless')
+  id = register_restart_field(parts_restart,filename,'start_day',start_day, &
+                                            longname='year day of calving event',units='days')
+  id = register_restart_field(parts_restart,filename,'start_mass',start_mass, &
+                                            longname='initial mass of calving part',units='kg')
+  id = register_restart_field(parts_restart,filename,'mass_scaling',mass_scaling, &
+                                            longname='scaling factor for mass of calving part',units='none')
+  id = register_restart_field(parts_restart,filename,'mass_of_bits',mass_of_bits, &
+                                            longname='mass of party bits',units='kg')
+  id = register_restart_field(parts_restart,filename,'heat_density',heat_density, &
+                                            longname='heat density',units='J/kg')
+
+  !Checking if any particles are static in order to decide whether to save static_part
+  n_static_parts = 0
+  do grdj = parts%grd%jsc,parts%grd%jec ; do grdi = parts%grd%isc,parts%grd%iec
+    this=>parts%list(grdi,grdj)%first
+    do while (associated(this))
+      n_static_parts=n_static_parts+this%static_part
+      this=>this%next
+    enddo
+  enddo ; enddo
+  call mpp_sum(n_static_parts)
+  if (n_static_parts .gt. 0) &
+    id = register_restart_field(parts_restart,filename,'static_part',static_part, &
+                                              longname='static_part',units='dimensionless')
+
+  ! Write variables
+
+  i = 0
+  do grdj = parts%grd%jsc,parts%grd%jec ; do grdi = parts%grd%isc,parts%grd%iec
+    this=>parts%list(grdi,grdj)%first
+    do while(associated(this))
+      i = i + 1
+      lon(i) = this%lon; lat(i) = this%lat
+      uvel(i) = this%uvel; vvel(i) = this%vvel
+      ine(i) = this%ine; jne(i) = this%jne
+      mass(i) = this%mass; thickness(i) = this%thickness
+      axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
+      bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
+      width(i) = this%width; length(i) = this%length
+      start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
+      start_year(i) = this%start_year; start_day(i) = this%start_day
+      start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
+      static_part(i) = this%static_part
+      call split_id(this%id, id_cnt(i), id_ij(i))
+      mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
+      this=>this%next
+    enddo
+  enddo ; enddo
+
+  call save_restart(parts_restart)
+  if (really_debug) print *, 'Finish save_restart.' ! LUYU: for debugging
+  call free_restart_type(parts_restart)
+
+  deallocate(              &
+             lon,          &
+             lat,          &
+             uvel,         &
+             vvel,         &
+             mass,         &
+             axn,          &
+             ayn,          &
+             bxn,          &
+             byn,          &
+             thickness,    &
+             width,        &
+             length,       &
+             start_lon,    &
+             start_lat,    &
+             start_day,    &
+             start_mass,   &
+             mass_scaling, &
+             mass_of_bits, &
+             static_part,  &
+             heat_density )
+
+  deallocate(           &
+             ine,       &
+             jne,       &
+             id_cnt,    &
+             id_ij,     &
+             start_year )
+
+  call nullify_domain()
 
  
 end subroutine write_restart
@@ -243,7 +406,7 @@ real, allocatable,dimension(:) :: lon,	&
 
     if (lres) then ! True if the particle resides on the current processors computational grid
       lres=pos_within_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne, localpart%xi, localpart%yj)
-      call interp_flds(grd,localpart%ine,localpart%jne,localpart%xi,localpart%yj,localpart%uvel, localpart%vvel)
+      !call interp_flds(grd,localpart%ine,localpart%jne,localpart%xi,localpart%yj,localpart%uvel, localpart%vvel) !LUYU: we need to move this to evolve_parts.
       call add_new_part_to_list(parts%list(localpart%ine,localpart%jne)%first, localpart)
     endif
   end do ! ln 650
@@ -262,7 +425,7 @@ end subroutine read_restart_parts
 !> Write a trajectory-based diagnostics file
 subroutine write_trajectory(trajectory, save_short_traj)
 ! Arguments
-type(xyt), pointer :: trajectory !< An iceberg trajectory
+type(xyt), pointer :: trajectory !< An particle trajectory
 logical, intent(in) :: save_short_traj !< If true, record less data
 ! Local variables
 integer :: iret, ncid, i_dim, i
@@ -504,45 +667,6 @@ logical function find_restart_file(filename, actual_file, multiPErestart, tile_i
 
 end function find_restart_file
 
-subroutine interp_flds(grd, i, j, xi, yj, uo, vo)
-! Arguments
- type(particles_gridded), pointer :: grd
- integer, intent(in) :: i, j
- real, intent(in) :: xi, yj
- real, intent(out) :: uo, vo
- ! Local variables
- real :: cos_rot, sin_rot
- real :: hxm, hxp
-
-
- cos_rot=bilin(grd, grd%cos, i, j, xi, yj) ! If true, uses the inverted bilin function
- sin_rot=bilin(grd, grd%sin, i, j, xi, yj)
-
- uo=bilin(grd, grd%uo, i, j, xi, yj)
- vo=bilin(grd, grd%vo, i, j, xi, yj)
-
- ! Rotate vectors from local grid to lat/lon coordinates
- call rotate(uo, vo, cos_rot, sin_rot)
-
-
-contains
-
-
- subroutine rotate(u, v, cos_rot, sin_rot)
-   ! Arguments
-   real, intent(inout) :: u, v
-   real, intent(in) :: cos_rot, sin_rot
-   ! Local variables
-   real :: u_old, v_old
-
-   u_old=u
-   v_old=v
-   u=cos_rot*u_old+sin_rot*v_old
-   v=cos_rot*v_old-sin_rot*u_old
-
- end subroutine rotate
-
-end subroutine interp_flds
 
 !######################################################################################
 
