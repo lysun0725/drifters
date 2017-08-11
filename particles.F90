@@ -2,6 +2,8 @@ module particles_mod
 
 use constants_mod, only: radius, pi, omega, HLF
 use MOM_grid, only : ocean_grid_type
+use MOM_diag_mediator, only : diag_ctrl
+use MOM_time_manager, only : time_type, get_date, operator(-)
 
 use fms_mod, only: field_exist, get_global_att_value
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
@@ -18,9 +20,10 @@ use mpp_domains_mod, only: domain2D, mpp_update_domains, mpp_define_domains
 use mpp_parameter_mod, only: CGRID_NE, BGRID_NE, CORNER, AGRID
 use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain
 use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
-use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
-use diag_manager_mod, only: register_diag_field, register_static_field, send_data
-use diag_manager_mod, only: diag_axis_init
+
+
+use diag_manager_mod, only: send_data
+!use diag_manager_mod, only: diag_axis_init
 
 use MOM, only : MOM_control_struct
 
@@ -74,16 +77,15 @@ real, parameter :: Cd_iv=0.9 !< (Vertical) Drag coefficient between parts and se
 contains
 
 ! ##############################################################################
-subroutine particles_init(parts, Grid, Time, MOM_CS, dt, axes)
+subroutine particles_init(parts, Grid, Time, dt, MOM_CS)
 
  use particles_io, only: read_restart_parts, particles_io_init
 
  type(particles), pointer :: parts
  type(ocean_grid_type), pointer :: Grid !< Grid type from parent model
  type(time_type), intent(in) :: Time !< Time type from parent model
- type(MOM_control_struct), pointer, intent(in) :: MOM_CS !< Pointer to a MOM control structure
  real, intent(in)            :: dt !< particle timestep in seconds
- integer, dimension(2), intent(in) :: axes !< diagnostic axis ids
+ type(MOM_control_struct), pointer, intent(in) :: MOM_CS
 
  integer :: io_layout(2)
  integer :: stdlogunit, stderrunit
@@ -98,13 +100,17 @@ subroutine particles_init(parts, Grid, Time, MOM_CS, dt, axes)
  gnj = Grid%jeg - Grid%jsg + 1
 
  call particles_framework_init(parts, &
-             gni, gnj, Grid%Domain%layout, Grid%Domain%io_layout, axes, Grid%Domain%X_FLAGS, Grid%Domain%X_FLAGS, &
-             dt, Time, Grid%geolonT, Grid%geolatT, Grid%mask2dT, Grid%dxT, Grid%dyT, Grid%areaT, &
-             Grid%cos_rot, Grid%sin_rot, ocean_depth=Grid%bathyT)
+             Grid, Time, dt, MOM_CS%diag)
+
+
+! call particles_framework_init(parts, &
+!             gni, gnj, Grid%Domain%layout, Grid%Domain%io_layout, axes, Grid%Domain%X_FLAGS, Grid%Domain%X_FLAGS, &
+!             dt, Time, Grid%geolonT, Grid%geolatT, Grid%mask2dT, Grid%dxT, Grid%dyT, Grid%areaT, &
+!             Grid%cos_rot, Grid%sin_rot, ocean_depth=Grid%bathyT)
 
 
  call mpp_clock_begin(parts%clock_ior)
- call particles_io_init(parts,io_layout)
+ call particles_io_init(parts,Grid%Domain%io_layout)
  call read_restart_parts(parts,Time, MOM_CS)
  call parts_chksum(parts, 'read_restart_particles')
  call mpp_clock_end(parts%clock_ior)

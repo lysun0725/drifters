@@ -3,7 +3,7 @@ module particles_io
 use constants_mod, only: pi, omega, HLF
 
 use mpp_domains_mod, only: domain2D
-use mpp_domains_mod, only: mpp_domain_is_tile_root_pe,mpp_get_domain_tile_root_pe
+use mpp_domains_mod, only: mpp_domain_is_tile_root_pe,mpp_get_domain_tile_root_pe, mpp_define_io_domain
 use mpp_domains_mod, only: mpp_get_tile_pelist,mpp_get_tile_npes,mpp_get_io_domain,mpp_get_tile_id
 
 use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
@@ -86,16 +86,22 @@ integer :: stdlogunit, stderrunit
 
   !I/O layout init
   io_tile_id=-1
+
   io_domain => mpp_get_io_domain(parts%grd%domain)
-  if(associated(io_domain)) then
-     io_tile_id = mpp_get_tile_id(io_domain)
-     is_io_tile_root_pe = mpp_domain_is_tile_root_pe(io_domain)
-     io_tile_root_pe = mpp_get_domain_tile_root_pe(io_domain)
-     np=mpp_get_tile_npes(io_domain)
-     allocate(io_tile_pelist(np))
-     call mpp_get_tile_pelist(io_domain,io_tile_pelist)
-     io_npes = io_layout(1)*io_layout(2)
+
+  if (.not. associated(io_domain)) then
+    call mpp_define_IO_domain(parts%grd%domain, io_layout)
+    io_domain => mpp_get_io_domain(parts%grd%domain)
   endif
+
+
+  io_tile_id = mpp_get_tile_id(io_domain)
+  is_io_tile_root_pe = mpp_domain_is_tile_root_pe(io_domain)
+  io_tile_root_pe = mpp_get_domain_tile_root_pe(io_domain)
+  np=mpp_get_tile_npes(io_domain)
+  allocate(io_tile_pelist(np))
+  call mpp_get_tile_pelist(io_domain,io_tile_pelist)
+  io_npes = io_layout(1)*io_layout(2)
 
   clock_trw=mpp_clock_id( 'particles-traj write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   clock_trp=mpp_clock_id( 'particles-traj prepare', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )

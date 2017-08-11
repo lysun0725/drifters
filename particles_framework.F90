@@ -2,6 +2,9 @@ module particles_framework
 
 use constants_mod, only: radius, pi, omega, HLF
 
+use MOM_grid, only : ocean_grid_type
+use MOM_diag_mediator, only : diag_ctrl
+
 use mpp_domains_mod, only: domain2D
 use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
 use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_pe, mpp_root_pe, mpp_chksum
@@ -368,10 +371,7 @@ contains
 
 ! ##############################################################################
 
-subroutine particles_framework_init(parts, &
-             gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
-             dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
-             cos_rot, sin_rot, ocean_depth, maskmap, fractional_area)
+subroutine particles_framework_init(parts, Grid, Time, dt, diag_axes)
 
 use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
 use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
@@ -391,16 +391,22 @@ use diag_manager_mod, only: diag_axis_init
 
 ! Arguments
 type(particles), pointer :: parts
-integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
-integer, intent(in) :: dom_x_flags, dom_y_flags
+type(ocean_grid_type), pointer, intent(in) :: Grid
+type(diag_ctrl), intent(in)  :: diag_axes
 real, intent(in) :: dt
-type (time_type), intent(in) :: Time ! current time
-real, dimension(:,:), intent(in) :: ice_lon, ice_lat, ice_wet
-real, dimension(:,:), intent(in) :: ice_dx, ice_dy, ice_area
-real, dimension(:,:), intent(in) :: cos_rot, sin_rot
-real, dimension(:,:), intent(in),optional :: ocean_depth
-logical, intent(in), optional :: maskmap(:,:)
-logical, intent(in), optional :: fractional_area
+type(time_type), intent(in) :: Time
+
+
+!integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
+!integer, intent(in) :: dom_x_flags, dom_y_flags
+
+!type (time_type), intent(in) :: Time ! current time
+!real, dimension(:,:), intent(in) :: ice_lon, ice_lat, ice_wet
+!real, dimension(:,:), intent(in) :: ice_dx, ice_dy, ice_area
+!real, dimension(:,:), intent(in) :: cos_rot, sin_rot
+!real, dimension(:,:), intent(in),optional :: ocean_depth
+!logical, intent(in), optional :: maskmap(:,:)
+!logical, intent(in), optional :: fractional_area
 
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
@@ -523,7 +529,8 @@ real :: Total_mass  !Added by Alon
   allocate(parts%grd)
   grd=>parts%grd ! For convenience to avoid parts%grd%X
  !write(stderrunit,*) 'diamonds: allocating domain'
-  allocate(grd%domain)
+ ! allocate(grd%domain)
+  grd%domain => Grid%domain%mpp_domain
 
 ! Clocks
   parts%clock=mpp_clock_id( 'Particles', flags=clock_flag_default, grain=CLOCK_COMPONENT )
@@ -542,12 +549,12 @@ real :: Total_mass  !Added by Alon
 
 ! Set up particle domain
  !write(stderrunit,*) 'diamonds: defining domain'
-  call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
-                           maskmap=maskmap, &
-                           xflags=dom_x_flags, xhalo=halo,  &
-                           yflags=dom_y_flags, yhalo=halo, name='diamond')
+!  call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
+!                           maskmap=maskmap, &
+!                           xflags=dom_x_flags, xhalo=halo,  &
+!                           yflags=dom_y_flags, yhalo=halo, name='diamond')
 
-  call mpp_define_io_domain(grd%domain, io_layout)
+!  call mpp_define_io_domain(grd%domain, io_layout)
 
  !write(stderrunit,*) 'diamond: get compute domain'
   call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
@@ -560,7 +567,7 @@ real :: Total_mass  !Added by Alon
   call mpp_get_neighbor_pe(grd%domain, WEST, grd%pe_W)
 
 
-  folded_north_on_pe = ((dom_y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == gnj))
+  folded_north_on_pe = ((Grid%Domain%y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == Grid%HI%jeg-Grid%HI%jsg+1))
  !write(stderrunit,'(a,6i4)') 'diamonds, particles_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
 
  !if (verbose) &
@@ -599,9 +606,9 @@ real :: Total_mass  !Added by Alon
  !write(stderrunit,*) 'diamonds: copying grid'
   ! Copy data declared on ice model computational domain
   is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
-  grd%lon(is:ie,js:je)=ice_lon(is:ie,js:je)
-  grd%lat(is:ie,js:je)=ice_lat(is:ie,js:je)
-  grd%area(is:ie,js:je)=ice_area(is:ie,js:je) !sis2 has *(4.*pi*radius*radius)
+  grd%lon(is:ie,js:je)=Grid%geolonT(is:ie,js:je)
+  grd%lat(is:ie,js:je)=Grid%geolatT(is:ie,js:je)
+  grd%area(is:ie,js:je)=Grid%areaT(is:ie,js:je) !sis2 has *(4.*pi*radius*radius)
 
   !!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!
   !if (mpp_pe().eq.5) then
@@ -621,18 +628,18 @@ real :: Total_mass  !Added by Alon
   !!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!
 
   !For SIS not to change answers
-  if(present(fractional_area)) then
-    if(fractional_area) grd%area(is:ie,js:je)=ice_area(is:ie,js:je) *(4.*pi*radius*radius)
-  endif
-  if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(is:ie,js:je)
-
+!  if(present(fractional_area)) then
+!    if(fractional_area) grd%area(is:ie,js:je)=ice_area(is:ie,js:je) *(4.*pi*radius*radius)
+!  endif
+ ! if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(is:ie,js:je)
+  grd%ocean_depth(is:ie,js:je) = Grid%bathyT(is:ie,js:je)
   ! Copy data declared on ice model data domain
   is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
-  grd%dx(is:ie,js:je)=ice_dx(is:ie,js:je)
-  grd%dy(is:ie,js:je)=ice_dy(is:ie,js:je)
-  grd%msk(is:ie,js:je)=ice_wet(is:ie,js:je)
-  grd%cos(is:ie,js:je)=cos_rot(is:ie,js:je)
-  grd%sin(is:ie,js:je)=sin_rot(is:ie,js:je)
+  grd%dx(is:ie,js:je)=Grid%dxT(is:ie,js:je)
+  grd%dy(is:ie,js:je)=Grid%dyT(is:ie,js:je)
+  grd%msk(is:ie,js:je)=Grid%mask2dT(is:ie,js:je)
+  grd%cos(is:ie,js:je)=Grid%cos_rot(is:ie,js:je)
+  grd%sin(is:ie,js:je)=Grid%sin_rot(is:ie,js:je)
 
   call mpp_update_domains(grd%lon, grd%domain, position=CORNER)
   call mpp_update_domains(grd%lat, grd%domain, position=CORNER)
@@ -672,12 +679,12 @@ real :: Total_mass  !Added by Alon
       if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i-1,j)-grd%lat(i-2,j)
   enddo; enddo
 
-  if (.not. present(maskmap)) then ! Using a maskmap causes tickles this sanity check
-    do j=grd%jsd,grd%jed; do i=grd%isd,grd%ied
+!  if (.not. present(maskmap)) then ! Using a maskmap causes tickles this sanity check
+!    do j=grd%jsd,grd%jed; do i=grd%isd,grd%ied
       !if (grd%lon(i,j).ge.big_number) write(stderrunit,*) 'bad lon: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lon(i,j)
       !if (grd%lat(i,j).ge.big_number) write(stderrunit,*) 'bad lat: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lat(i,j)
-    enddo; enddo
-  endif
+!    enddo; enddo
+!  endif
 
   if ((Lx.gt.1E15 ) .and. (mpp_pe().eq.mpp_root_pe())) then
           call error_mesg('diamonds, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING)
@@ -878,32 +885,32 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   if (read_old_restarts) call error_mesg('diamonds, ice_parts_framework_init', 'Setting "read_old_restarts=.true." is obsolete and does nothing!', WARNING)
 
   ! Diagnostics
-  id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'particle mass')
-  axes3d(1:2)=axes
-  axes3d(3)=id_class
-  grd%id_uo=register_diag_field('particles', 'uo', axes, Time, &
-     'Ocean zonal component of velocity', 'm s^-1')
-  grd%id_vo=register_diag_field('particles', 'vo', axes, Time, &
-     'Ocean meridional component of velocity', 'm s^-1')
-  grd%id_ocean_depth=register_diag_field('particles', 'Depth', axes, Time, &
-     'Ocean Depth', 'm')
+!  id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'particle mass')
+!  axes3d(1:2)=diag_axes%axesT1%handles(1:2)
+!  axes3d(3)=id_class
+!  grd%id_uo=register_diag_field('particles', 'uo', diag_axes%axesT1, Time, &
+!     'Ocean zonal component of velocity', 'm s^-1')
+!  grd%id_vo=register_diag_field('particles', 'vo', diag_axes%axesT1, Time, &
+!     'Ocean meridional component of velocity', 'm s^-1')
+!  grd%id_ocean_depth=register_diag_field('particles', 'Depth', diag_axes%axesT1, Time, &
+!     'Ocean Depth', 'm')
 
   ! Static fields
-  id_class=register_static_field('particles', 'lon', axes, &
-               'longitude (corners)', 'degrees_E')
-  if (id_class>0) lerr=send_data(id_class, grd%lon(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('particles', 'lat', axes, &
-               'latitude (corners)', 'degrees_N')
-  if (id_class>0) lerr=send_data(id_class, grd%lat(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('particles', 'area', axes, &
-               'cell area', 'm^2')
-  if (id_class>0) lerr=send_data(id_class, grd%area(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('particles', 'mask', axes, &
-               'wet point mask', 'none')
-  if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('particles', 'ocean_depth_static', axes, &
-               'ocean depth static', 'm')
-  if (id_class>0) lerr=send_data(id_class, grd%ocean_depth(grd%isc:grd%iec,grd%jsc:grd%jec))
+  ! id_class=register_static_field('particles', 'lon', diag_axes%axesT1, &
+  !              'longitude (corners)', 'degrees_E')
+  ! if (id_class>0) lerr=send_data(id_class, grd%lon(grd%isc:grd%iec,grd%jsc:grd%jec))
+  ! id_class=register_static_field('particles', 'lat', diag_axes%axesT1, &
+  !              'latitude (corners)', 'degrees_N')
+  ! if (id_class>0) lerr=send_data(id_class, grd%lat(grd%isc:grd%iec,grd%jsc:grd%jec))
+  ! id_class=register_static_field('particles', 'area', diag_axes%axesT1, &
+  !              'cell area', 'm^2')
+  ! if (id_class>0) lerr=send_data(id_class, grd%area(grd%isc:grd%iec,grd%jsc:grd%jec))
+  ! id_class=register_static_field('particles', 'mask', diag_axes%axesT1, &
+  !              'wet point mask', 'none')
+  ! if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
+  ! id_class=register_static_field('particles', 'ocean_depth_static', diag_axes%axesT1, &
+  !              'ocean depth static', 'm')
+  ! if (id_class>0) lerr=send_data(id_class, grd%ocean_depth(grd%isc:grd%iec,grd%jsc:grd%jec))
 
   if (debug) then
     call grd_chksum2(grd, grd%lon, 'init lon')
@@ -3826,7 +3833,7 @@ integer :: grdi, grdj
       fld(i,19) = float(ipart) !Changed from 11 to 19 by Alon
       icnt(this%ine,this%jne)=icnt(this%ine,this%jne)+1
       fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) ) !*float( i )
-      grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)+log(this%mass)
+      grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)!+log(this%mass)
       ichk5=ichk5+ipart
       this=>this%next
     enddo

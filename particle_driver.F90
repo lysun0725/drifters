@@ -26,7 +26,6 @@ PROGRAM particle_driver
 !  use particles_io, only : read_restart_particles
   use particles_framework, only : particle, particles !, particles_gridded
 !  use particles_extra, only : particles_framework_ini, read_restart_particles
-
   implicit none
 
   type(ocean_grid_type), target :: Grid
@@ -179,12 +178,11 @@ PROGRAM particle_driver
   
   do n=1,nPEs_ocn
     CS=>CSp(n)
-    call particles_init( node, ocn_grd, Time, CS, dt, axes)
+    call particles_init( node, ocn_grd, Time, dt, CS)
   enddo
 
   do n=1,nPEs_ocn
     CS=>CSp(n)
-    CS%GV=>GV
     call particles_run(node,time,CS%u(:,:,1),CS%v(:,:,1)) ! Run the particles model
   enddo
 
