@@ -32,12 +32,12 @@ PROGRAM particle_driver
   type(ocean_grid_type), target :: Grid
   type(verticalGrid_type), target :: GV
   type(dyn_horgrid_type), pointer :: dG => NULL()
-  type(MOM_control_struct), pointer, dimension(:) :: CSp !<pointer of ensemble list of MOM control structures
+  type(MOM_control_struct), allocatable, target, dimension(:) :: CSp !<pointer of ensemble list of MOM control structures
   type(MOM_control_struct), pointer :: CS=> NULL() !<pointer to an element in CSp
   type(hor_index_type)   :: HI ! A hor_index_type for array extents
-  type(particles), target  :: drifters
+  type(particles), pointer  :: drifters => NULL() !< pointer to current ensemble member drifter structure
+  type(particles), allocatable, target, dimension(:)  :: drifters_ens !< drifter ensemble
   type(particles), pointer :: node=>NULL() !<pointer to an element in drifters list
-  type(ocean_grid_type),  pointer :: ocn_grd
   type(time_type) :: time, time_start, time_start_segment, time_end, time_in
   real :: time_step
   character(len=128) :: history_file
@@ -79,6 +79,7 @@ PROGRAM particle_driver
        atm_pelist,ocn_pelist,lnd_pelist,ice_pelist)
   call set_current_pelist(ocn_pelist)
   allocate(CSp(nPEs_ocn))
+  allocate(drifters_ens(nPEs_ocn))
 
   call open_file(unit,'input.nml',form=ASCII_FILE,action=READONLY_FILE)
   read(unit,particle_driver_nml,iostat=io_status)
@@ -174,19 +175,22 @@ PROGRAM particle_driver
   enddo
 
   call destroy_dyn_horgrid(dG)
-  node=>drifters
-  ocn_grd=>Grid
-  
+
   do n=1,nPEs_ocn
     CS=>CSp(n)
-    call particles_init( node, ocn_grd, Time, dt, CS)
+    node=>drifters_ens(n)
+    call particles_init( node, Grid, Time, dt, CS)
   enddo
 
   do n=1,nPEs_ocn
     CS=>CSp(n)
+    node=>drifters_ens(n)
     call particles_run(node,time,CS%u(:,:,1),CS%v(:,:,1)) ! Run the particles model
   enddo
 
-  call particles_save_restart(node)
+  do n=1,nPEs_ocn
+    node=>drifters_ens(n)
+    call particles_save_restart(node)
+  enddo
 
 END PROGRAM particle_driver

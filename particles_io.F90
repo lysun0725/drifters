@@ -35,10 +35,10 @@ use particles_framework, only: find_individual_particle
 use particles_framework, only: push_posn
 use particles_framework, only: add_new_part_to_list,destroy_particle
 use particles_framework, only: increase_ibuffer,grd_chksum2,grd_chksum3
-use particles_framework, only: sum_mass,sum_heat,bilin
+use particles_framework, only: bilin
 !params !Niki: write a subroutine to get these
-use particles_framework, only: nclasses, buffer_width, buffer_width_traj
-use particles_framework, only: verbose, really_debug, debug, restart_input_dir,make_calving_reproduce
+use particles_framework, only: buffer_width, buffer_width_traj
+use particles_framework, only: verbose, really_debug, debug, restart_input_dir
 use particles_framework, only: ignore_ij_restart, use_slow_find,generate_test_particles!,print_part
 use particles_framework, only: force_all_pes_traj
 !use particles_framework, only: check_for_duplicates_in_parallel
@@ -131,22 +131,15 @@ real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
                                    uvel,         &
                                    vvel,         &
-                                   mass,         &
                                    axn,          &
                                    ayn,          &
                                    bxn,          &
                                    byn,          &
-                                   thickness,    &
-                                   width,        &
-                                   length,       &
                                    start_lon,    &
                                    start_lat,    &
-                                   start_day,    &
-                                   start_mass,   &
-                                   mass_scaling, &
-                                   mass_of_bits, &
-                                   static_part,  &
-                                   heat_density
+                                   start_day
+
+
 
 integer, allocatable, dimension(:) :: ine,              &
                                       jne,              &
@@ -186,22 +179,14 @@ integer :: grdi, grdj
    allocate(lat(nparts))
    allocate(uvel(nparts))
    allocate(vvel(nparts))
-   allocate(mass(nparts))
    allocate(axn(nparts))    !Alon
    allocate(ayn(nparts))    !Alon
    allocate(bxn(nparts)) !Alon
    allocate(byn(nparts)) !Alon
-   allocate(thickness(nparts))
-   allocate(width(nparts))
-   allocate(length(nparts))
    allocate(start_lon(nparts))
    allocate(start_lat(nparts))
    allocate(start_day(nparts))
-   allocate(start_mass(nparts))
-   allocate(mass_scaling(nparts))
-   allocate(mass_of_bits(nparts))
-   allocate(heat_density(nparts))
-   allocate(static_part(nparts))
+
 
    allocate(ine(nparts))
    allocate(jne(nparts))
@@ -224,7 +209,6 @@ integer :: grdi, grdj
   id = register_restart_field(parts_restart,filename,'lat',lat,longname='latitude',units='degrees_N')
   id = register_restart_field(parts_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
   id = register_restart_field(parts_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
-  id = register_restart_field(parts_restart,filename,'mass',mass,longname='mass',units='kg')
   if (.not. parts%Runge_not_Verlet) then
     id = register_restart_field(parts_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2')
     id = register_restart_field(parts_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2')
@@ -233,9 +217,6 @@ integer :: grdi, grdj
   endif
   id = register_restart_field(parts_restart,filename,'ine',ine,longname='i index',units='none')
   id = register_restart_field(parts_restart,filename,'jne',jne,longname='j index',units='none')
-  id = register_restart_field(parts_restart,filename,'thickness',thickness,longname='thickness',units='m')
-  id = register_restart_field(parts_restart,filename,'width',width,longname='width',units='m')
-  id = register_restart_field(parts_restart,filename,'length',length,longname='length',units='m')
   id = register_restart_field(parts_restart,filename,'start_lon',start_lon, &
                                             longname='longitude of calving location',units='degrees_E')
   id = register_restart_field(parts_restart,filename,'start_lat',start_lat, &
@@ -248,28 +229,7 @@ integer :: grdi, grdj
                                             longname='position component of particle id', units='dimensionless')
   id = register_restart_field(parts_restart,filename,'start_day',start_day, &
                                             longname='year day of calving event',units='days')
-  id = register_restart_field(parts_restart,filename,'start_mass',start_mass, &
-                                            longname='initial mass of calving part',units='kg')
-  id = register_restart_field(parts_restart,filename,'mass_scaling',mass_scaling, &
-                                            longname='scaling factor for mass of calving part',units='none')
-  id = register_restart_field(parts_restart,filename,'mass_of_bits',mass_of_bits, &
-                                            longname='mass of party bits',units='kg')
-  id = register_restart_field(parts_restart,filename,'heat_density',heat_density, &
-                                            longname='heat density',units='J/kg')
 
-  !Checking if any particles are static in order to decide whether to save static_part
-  n_static_parts = 0
-  do grdj = parts%grd%jsc,parts%grd%jec ; do grdi = parts%grd%isc,parts%grd%iec
-    this=>parts%list(grdi,grdj)%first
-    do while (associated(this))
-      n_static_parts=n_static_parts+this%static_part
-      this=>this%next
-    enddo
-  enddo ; enddo
-  call mpp_sum(n_static_parts)
-  if (n_static_parts .gt. 0) &
-    id = register_restart_field(parts_restart,filename,'static_part',static_part, &
-                                              longname='static_part',units='dimensionless')
 
   ! Write variables
 
@@ -281,16 +241,10 @@ integer :: grdi, grdj
       lon(i) = this%lon; lat(i) = this%lat
       uvel(i) = this%uvel; vvel(i) = this%vvel
       ine(i) = this%ine; jne(i) = this%jne
-      mass(i) = this%mass; thickness(i) = this%thickness
       axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
       bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
-      width(i) = this%width; length(i) = this%length
       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
       start_year(i) = this%start_year; start_day(i) = this%start_day
-      start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
-      static_part(i) = this%static_part
-      call split_id(this%id, id_cnt(i), id_ij(i))
-      mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
       this=>this%next
     enddo
   enddo ; enddo
@@ -304,22 +258,14 @@ integer :: grdi, grdj
              lat,          &
              uvel,         &
              vvel,         &
-             mass,         &
              axn,          &
              ayn,          &
              bxn,          &
              byn,          &
-             thickness,    &
-             width,        &
-             length,       &
              start_lon,    &
              start_lat,    &
-             start_day,    &
-             start_mass,   &
-             mass_scaling, &
-             mass_of_bits, &
-             static_part,  &
-             heat_density )
+             start_day  )
+
 
   deallocate(           &
              ine,       &
@@ -364,6 +310,10 @@ real, allocatable,dimension(:) :: lon,	&
 
   ! For convenience
   grd=>parts%grd
+
+
+  grd%uo=> MOM_CS%u(:,:,1)
+  grd%vo=> MOM_CS%v(:,:,1)
 
   ! Zero out nparts_in_file
   nparts_in_file = 0

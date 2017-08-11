@@ -21,13 +21,11 @@ implicit none ; private
 
 integer :: buffer_width=28 ! size of buffer dimension for comms
 integer :: buffer_width_traj=32  ! LUYU: modify this later. use?
-integer, parameter :: nclasses=10 ! Number of particles classes
 
 !Local Vars
 ! Global data (minimal for debugging)
 logical :: folded_north_on_pe = .false. !< If true, indicates the presence of the tri-polar grid
 logical :: verbose=.false. !< Be verbose to stderr
-logical :: budget=.true. !< Calculate budgets
 logical :: debug=.false. !< Turn on debugging
 logical :: really_debug=.false. !< Turn on debugging
 logical :: parallel_reprod=.true. !< Reproduce across different PE decompositions
@@ -35,8 +33,6 @@ logical :: use_slow_find=.true. !< Use really slow (but robust) find_cell for re
 logical :: ignore_ij_restart=.false. !< Read i,j location from restart if available (needed to use restarts on different grids)
 logical :: generate_test_particles=.false. !< Create particles in absence of a restart file
 logical :: use_roundoff_fix=.true. !< Use a "fix" for the round-off discrepancy between is_point_in_cell() and pos_within_cell()
-logical :: old_bug_rotated_weights=.false. !< Skip the rotation of off-center weights for rotated halo updates
-logical :: make_calving_reproduce=.false. !< Make the calving.res.nc file reproduce across pe count changes.
 logical :: old_bug_bilin=.true. !< If true, uses the inverted bilinear function (use False to get correct answer)
 character(len=10) :: restart_input_dir = 'INPUT/' !< Directory to look for restart files
 integer, parameter :: delta_buf=25 !< Size by which to increment buffers
@@ -47,9 +43,9 @@ logical :: force_all_pes_traj=.false. !< Force all pes write trajectory files re
 
 
 !Public params !Niki: write a subroutine to expose these
-public nclasses,buffer_width,buffer_width_traj
-public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,old_bug_bilin,use_roundoff_fix
-public ignore_ij_restart, use_slow_find,generate_test_particles,old_bug_rotated_weights,budget
+public buffer_width,buffer_width_traj
+public verbose, really_debug, debug, restart_input_dir,old_bug_bilin,use_roundoff_fix
+public ignore_ij_restart, use_slow_find,generate_test_particles
 public orig_read, force_all_pes_traj
 
 !Public types
@@ -67,7 +63,7 @@ public print_fld,print_part, print_parts,record_posn, push_posn, append_posn, ch
 public move_trajectory, move_all_trajectories
 !public form_a_bond, connect_all_bonds, show_all_bonds, bond_address_update
 public find_cell, find_cell_by_search, count_parts, is_point_in_cell, pos_within_cell!, count_bonds
-public sum_mass, sum_heat, bilin, yearday, parts_chksum, list_chksum, count_parts_in_list
+public bilin, yearday, parts_chksum, list_chksum, count_parts_in_list
 public checksum_gridded
 public grd_chksum2,grd_chksum3
 public fix_restart_dates, offset_part_dates
@@ -116,39 +112,6 @@ type :: particles_gridded
   real, dimension(:,:), pointer :: ocean_depth=>NULL() !< Depth of ocean (m)
   real, dimension(:,:), pointer :: uo=>null() !< Ocean zonal flow (m/s)
   real, dimension(:,:), pointer :: vo=>null() !< Ocean meridional flow (m/s)
-  real, dimension(:,:), pointer :: ui=>null() !< Ice zonal flow (m/s)
-  real, dimension(:,:), pointer :: vi=>null() !< Ice meridional flow (m/s)
-  real, dimension(:,:), pointer :: ua=>null() !< Atmosphere zonal flow (m/s)
-  real, dimension(:,:), pointer :: va=>null() !< Atmosphere meridional flow (m/s)
-  real, dimension(:,:), pointer :: ssh=>null() !< Sea surface height (m)
-  real, dimension(:,:), pointer :: sst=>null() !< Sea surface temperature (oC)
-  real, dimension(:,:), pointer :: sss=>null() !< Sea surface salinity (psu)
-  real, dimension(:,:), pointer :: cn=>null() !< Sea-ice concentration (0 to 1)
-  real, dimension(:,:), pointer :: hi=>null() !< Sea-ice thickness (m)
-  real, dimension(:,:), pointer :: calving=>null() !< Calving mass rate [frozen runoff] (kg/s) (into stored ice)
-  real, dimension(:,:), pointer :: calving_hflx=>null() !< Calving heat flux [heat content of calving] (W/m2) (into stored ice)
-  real, dimension(:,:), pointer :: floating_melt=>null() !< Net melting rate to particles + bits (kg/s/m^2)
-  real, dimension(:,:), pointer :: part_melt=>null() !< Melting+erosion rate of particles (kg/s/m^2)
-  real, dimension(:,:), pointer :: melt_buoy=>null() !< Buoyancy component of melting rate (kg/s/m^2)
-  real, dimension(:,:), pointer :: melt_eros=>null() !< Erosion component of melting rate (kg/s/m^2)
-  real, dimension(:,:), pointer :: melt_conv=>null() !< Convective component of melting rate (kg/s/m^2)
-  real, dimension(:,:), pointer :: party_src=>null() !< Mass flux from part erosion into party bits (kg/s/m^2)
-  real, dimension(:,:), pointer :: party_melt=>null() !< Melting rate of party bits (kg/s/m^2)
-  real, dimension(:,:), pointer :: party_mass=>null() !< Mass distribution of party bits (kg/s/m^2)
-  real, dimension(:,:), pointer :: spread_mass=>null() !< Mass of particles after spreading (kg/m^2)
-  real, dimension(:,:), pointer :: spread_mass_old=>null() !< Mass of particles after spreading old (kg/m^2)
-  real, dimension(:,:), pointer :: spread_area=>null() !< Area of particles after spreading (m^2/m^2)
-  real, dimension(:,:), pointer :: u_particle=>null() !< Average particle velocity in grid cell (mass weighted - but not spread mass weighted)
-  real, dimension(:,:), pointer :: v_particle=>null() !< Average particle velocity in grid cell (mass weighted - but not spread mass weighted)
-  real, dimension(:,:), pointer :: spread_uvel=>null() !< Average particle velocity in grid cell (spread area weighted)
-  real, dimension(:,:), pointer :: spread_vvel=>null() !< Average particle velocity in grid cell (spread area weighted)
-  real, dimension(:,:), pointer :: ustar_particle=>null() !< Frictional velocity below particles to be passed to ocean
-  real, dimension(:,:), pointer :: virtual_area=>null() !< Virtual surface coverage by particles (m^2)
-  real, dimension(:,:), pointer :: mass=>null() !< Mass distribution (kg/m^2)
-  real, dimension(:,:,:), pointer :: mass_on_ocean=>null() !< Mass distribution partitioned by neighbor (kg)
-  real, dimension(:,:,:), pointer :: area_on_ocean=>null() !< Area distribution partitioned by neighbor (m^2)
-  real, dimension(:,:,:), pointer :: Uvel_on_ocean=>null() !< zonal velocity distribution partitioned by neighbor (m^2* m/s)
-  real, dimension(:,:,:), pointer :: Vvel_on_ocean=>null() !< meridional momentum distribution partitioned by neighbor (m^2 m/s)
   real, dimension(:,:), pointer :: tmp=>null() !< Temporary work space
   real, dimension(:,:), pointer :: tmpc=>null() !< Temporary work space
   real, dimension(:,:), pointer :: parity_x=>null() !< X component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
@@ -156,21 +119,9 @@ type :: particles_gridded
   integer, dimension(:,:), pointer :: particle_counter_grd=>null() !< Counts particles created for naming purposes
   !>@{
   !! Diagnostic handle
-  integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_floating_melt=-1
-  integer :: id_melt_buoy=-1, id_melt_eros=-1, id_melt_conv=-1, id_virtual_area=-1, id_real_calving=-1
-  integer :: id_calving_hflx_in=-1, id_stored_heat=-1, id_melt_hflx=-1, id_heat_content=-1
-  integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
-  integer :: id_party_src=-1, id_party_melt=-1, id_party_mass=-1, id_part_melt=-1
-  integer :: id_rmean_calving=-1, id_rmean_calving_hflx=-1
-  integer :: id_spread_mass=-1, id_spread_area=-1
-  integer :: id_ssh=-1, id_fax=-1, id_fay=-1
-  integer :: id_count=-1, id_chksum=-1, id_u_particle=-1, id_v_particle=-1, id_sss=-1, id_ustar_particle
-  integer :: id_spread_uvel=-1, id_spread_vvel=-1
-  integer :: id_melt_m_per_year=-1
-  integer :: id_ocean_depth=-1
+  integer :: id_uo=-1, id_vo=-1, id_unused=-1
+  integer :: id_count=-1, id_chksum=-1
   !>@}
-
-  real :: clipping_depth=0. !< The effective depth at which to clip the weight felt by the ocean [m].
 
 end type particles_gridded
 
@@ -187,33 +138,20 @@ end type xyt
 type :: particle
   type(particle), pointer :: prev=>null(), next=>null()
   ! State variables (specific to the particle, needed for restarts)
-  real :: lon, lat, uvel, vvel, mass, thickness, width, length
+  real :: lon, lat, uvel, vvel
   real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lon_old, lat_old !Explicit and implicit accelerations !Alon
-  real :: start_lon, start_lat, start_day, start_mass, mass_scaling
-  real :: mass_of_bits, heat_density
+  real :: start_lon, start_lat, start_day
   integer :: start_year
   integer :: particle_num
   real :: halo_part  ! Equal to zero for parts on computational domain, and =1 for parts on the halo
-  real :: static_part  ! Equal to 1 for particles which are static (not allowed to move). Might be extended to grounding later
   integer(kind=8) :: id !< Particle identifier
   integer :: ine, jne ! nearest index in NE direction (for convenience)
   real :: xi, yj ! Non-dimensional coords within current cell (0..1)
   ! Environment variables (as seen by the particle)
-  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
+  real :: uo, vo
   type(xyt), pointer :: trajectory=>null()
-  type(bond), pointer :: first_bond=>null() !< First element of bond list.
 end type particle
 
-
-!> A bond object connecting two parts, used as a link in a linked list
-type :: bond
-  type(bond), pointer :: prev_bond=>null() !< Previous link in list
-  type(bond), pointer :: next_bond=>null() !< Next link in list
-  type(particle), pointer :: other_part=>null()
-  integer(kind=8) :: other_id !< ID of other part
-  integer :: other_part_ine
-  integer :: other_part_jne
-end type bond
 
 type :: buffer
   integer :: size=0
@@ -237,74 +175,20 @@ type :: particles !; private
   integer :: traj_sample_hrs !< Period between sampling for trajectories (hours)
   integer :: traj_write_hrs !< Period between writing of trajectories (hours)
   integer :: verbose_hrs !< Period between terminal status reports (hours)
-  integer :: max_bonds
   !>@{
   !! Handles for clocks
   integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia
   integer :: clock_trw, clock_trp
   !>@}
-  real :: rho_parts !< Density of particles [kg/m^3]
-  real :: spring_coef !< Spring constant for particle interactions
-  real :: bond_coef !< Spring constant for particle bonds
-  real :: radial_damping_coef !< Coefficient for relative particle motion damping (radial component) -Alon
-  real :: tangental_damping_coef !< Coefficient for relative particle motion damping (tangential component) -Alon
-  real :: LoW_ratio !< Initial ratio L/W for newly calved particles
-  real :: party_bit_erosion_fraction !< Fraction of erosion melt flux to divert to party bits
-  real :: sicn_shift !< Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
-  real :: lat_ref=0. !< Reference latitude for f-plane (when this option is on)
-  real :: u_override=0.0 !< Overrides the u velocity of particles (for ocean testing)
-  real :: v_override=0.0 !< Overrides the v velocity of particles (for ocean testing)
-  real :: utide_particles= 0. !< Tidal speeds, set to zero for now.
-  real :: ustar_particles_bg=0.001 !< Background u_star under particles. This should be linked to a value felt by the ocean boundary layer
-  real :: cdrag_particles =  1.5e-3 !< Momentum Drag coef, taken from HJ99 (Holland and Jenkins 1999)
-  real :: initial_orientation=0. !< particle orientation relative to this angle (in degrees). Used for hexagonal mass spreading.
-  real :: Gamma_T_3EQ=0.022 !< Non-dimensional heat-transfer coefficient
-  real :: melt_cutoff=-1.0 !< Minimum ocean thickness for melting to occur (is not applied for values < 0)
-  logical :: const_gamma=.True. !< If true uses a constant heat transfer coefficient, from which the salt transfer is calculated
-  real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
-  real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
   logical :: restarted=.false. !< Indicate whether we read state from a restart or not
-  logical :: use_operator_splitting=.true. !< Use first order operator splitting for thermodynamics
-  logical :: add_weight_to_ocean=.true. !< Add weight of parts to ocean
-  logical :: passive_mode=.false. !< Add weight of particles + bits to ocean
-  logical :: time_average_weight=.false. !< Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True. !< True=Runge-Kutta, False=Verlet.
-  logical :: use_mixed_melting=.False. !< If true, then the melt is determined partly using 3 eq model partly using particle parameterizations (according to particle bond number)
-  logical :: apply_thickness_cutoff_to_gridded_melt=.False. !< Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
-  logical :: apply_thickness_cutoff_to_parts_melt=.False. !< Prevents melt for ocean thickness below melt_cuttoff (applied to parts)
-  logical :: use_updated_rolling_scheme=.false. !< True to use the aspect ratio based rolling scheme rather than incorrect version of WM scheme (set tip_parameter=1000. for correct WM scheme)
-  logical :: pass_fields_to_ocean_model=.False. !< particle area, mass and ustar fields are prepared to pass to ocean model
-  logical :: use_mixed_layer_salinity_for_thermo=.False. !< If true, then model uses ocean salinity for 3 and 2 equation melt model.
-  logical :: find_melt_using_spread_mass=.False. !< If true, then the model calculates ice loss by looping at the spread_mass before and after.
-  logical :: Use_three_equation_model=.True. !< Uses 3 equation model for melt when ice shelf type thermodynamics are used.
-  logical :: melt_particles_as_ice_shelf=.False. !< Uses iceshelf type thermodynamics
-  logical :: particle_melt_without_decay=.False. !< Allows particles meltwater fluxes to enter the ocean, without the particle decaying or changing shape.
-  logical :: add_particle_thickness_to_SSH=.False. !< Adds the particle contribution to SSH.
-  logical :: override_particle_velocities=.False. !< Allows you to set a fixed particle velocity for all non-static particles.
-  logical :: use_f_plane=.False. !< Flag to use a f-plane for the rotation
-  logical :: rotate_particles_for_mass_spreading=.True. !< Flag allows particles to rotate for spreading their mass (in hexagonal spreading mode)
-  logical :: set_melt_rates_to_zero=.False. !< Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
-  logical :: hexagonal_particles=.False. !< True treats particles as rectangles, False as hexagonal elements (for the purpose of mass spreading)
-  logical :: allow_parts_to_roll=.True. !< Allows particles to roll over when rolling conditions are met
   logical :: ignore_missing_restart_parts=.False. !< True Allows the model to ignore particles missing in the restart.
-  logical :: Static_particles=.False. !< True= particles do no move
-  logical :: only_interactive_forces=.False. !< particles only feel interactive forces, and not ocean, wind...
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
   logical :: save_short_traj=.True. !< True saves only lon,lat,time,id in particle_trajectory.nc
   logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
-  logical :: particle_bonds_on=.False. !< True=Allow particles to have bonds, False=don't allow.
-  logical :: manually_initialize_bonds=.False. !< True= Bonds are initialize manually.
   logical :: use_new_predictive_corrective =.False. !< Flag to use Bob's predictive corrective particle scheme- Added by Alon
-  logical :: interactive_particles_on=.false. !< Turn on/off interactions between particles  - Added by Alon
-  logical :: critical_interaction_damping_on=.true. !< Sets the damping on relative particle velocity to critical value - Added by Alon
-  logical :: use_old_spreading=.true. !< If true, spreads particle mass as if the part is one grid cell wide
-  logical :: read_ocean_depth_from_file=.false. !< If true, ocean depth is read from a file.
   integer(kind=8) :: debug_particle_with_id = -1 !< If positive, monitors a part with this id
 
-  real :: speed_limit=0. !< CFL speed limit for a part [m/s]
-  real :: tau_calving=0. !< Time scale for smoothing out calving field (years)
-  real :: tip_parameter=0. !< parameter to override particle rolling critical ratio (use zero to get parameter directly from ice and seawater densities)
-  real :: grounding_fraction=0. !< Fraction of water column depth at which grounding occurs
   type(buffer), pointer :: obuffer_n=>null() !< Buffer for outgoing parts to the north
   type(buffer), pointer :: ibuffer_n=>null() !< Buffer for incoming parts from the north
   type(buffer), pointer :: obuffer_s=>null() !< Buffer for outgoing parts to the south
@@ -315,34 +199,6 @@ type :: particles !; private
   type(buffer), pointer :: ibuffer_w=>null() !< Buffer for incoming parts from the west
   type(buffer), pointer :: obuffer_io=>null() !< Buffer for outgoing parts during i/o
   type(buffer), pointer :: ibuffer_io=>null() !< Buffer for incoming parts during i/o
-  ! Budgets
-  real :: net_calving_received=0., net_calving_returned=0.
-  real :: net_incoming_calving=0., net_outgoing_calving=0.
-  real :: net_incoming_calving_heat=0., net_outgoing_calving_heat=0.
-  real :: net_incoming_calving_heat_used=0., net_heat_to_parts=0.
-  real :: stored_start=0., stored_end=0.
-  real :: rmean_calving_start=0., rmean_calving_end=0.
-  real :: rmean_calving_hflx_start=0., rmean_calving_hflx_end=0.
-  real :: stored_heat_start=0., stored_heat_end=0., net_heat_to_ocean=0.
-  real :: net_calving_used=0., net_calving_to_parts=0.
-  real :: floating_mass_start=0., floating_mass_end=0.
-  real :: floating_heat_start=0., floating_heat_end=0.
-  real :: particles_mass_start=0., particles_mass_end=0.
-  real :: party_mass_start=0., party_mass_end=0.
-  real :: spread_mass_start=0., spread_mass_end=0.
-  real :: spread_area_start=0., spread_area_end=0.
-  real :: u_particle_start=0., u_particle_end=0.
-  real :: v_particle_start=0., v_particle_end=0.
-  real :: spread_uvel_start=0., spread_uvel_end=0.
-  real :: spread_vvel_start=0., spread_vvel_end=0.
-  real :: ustar_particle_start=0., ustar_particle_end=0.
-  real :: returned_mass_on_ocean=0.
-  real :: returned_area_on_ocean=0.
-  real :: net_melt=0., part_melt=0., party_src=0., party_melt=0.
-  integer :: nparts_calved=0, nparts_melted=0, nparts_start=0, nparts_end=0
-  integer :: nspeeding_tickets=0
-  integer :: nbonds=0
-  integer, dimension(:), pointer :: nparts_calved_by_class=>null()
 end type particles
 
 
@@ -391,7 +247,7 @@ use diag_manager_mod, only: diag_axis_init
 
 ! Arguments
 type(particles), pointer :: parts
-type(ocean_grid_type), pointer, intent(in) :: Grid
+type(ocean_grid_type), target, intent(in) :: Grid
 type(diag_ctrl), intent(in)  :: diag_axes
 real, intent(in) :: dt
 type(time_type), intent(in) :: Time
@@ -413,87 +269,30 @@ integer :: halo=4 ! Width of halo region
 integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
 integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
 integer :: verbose_hrs=24 ! Period between verbose messages
-integer :: max_bonds=6 ! Maximum number of particle bond passed between processors
-real :: rho_parts=850. ! Density of particles
-real :: spring_coef=1.e-8 ! Spring constant for particle interactions (this seems to be the highest stable value)
-real :: bond_coef=1.e-8 ! Spring constant for particle bonds - not being used right now
-real :: radial_damping_coef=1.e-4 ! Coefficient for relative particle motion damping (radial component) -Alon
-real :: tangental_damping_coef=2.e-5 ! Coefficient for relative particle motion damping (tangential component) -Alon
-real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved particles
-real :: party_bit_erosion_fraction=0. ! Fraction of erosion melt flux to divert to party bits
-real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
-real :: lat_ref=0. ! Reference latitude for f-plane (when this option is on)
-real :: u_override=0.0 ! Overrides the u velocity of particles (for ocean testing)
-real :: v_override=0.0 ! Overrides the v velocity of particles (for ocean testing)
 real :: Lx=360. ! Length of domain in x direction, used for periodicity (use a huge number for non-periodic)
-real :: initial_orientation=0. ! particle orientation relative to this angle (in degrees). Used for hexagonal mass spreading.
-real :: utide_particles= 0. ! Tidal speeds, set to zero for now.
-real :: ustar_particles_bg=0.001 ! Background u_star under particles. This should be linked to a value felt by the ocean boundary layer
-real :: cdrag_particles =  1.5e-3 ! Momentum Drag coef, taken from HJ99  (Holland and Jenkins 1999)
-real :: Gamma_T_3EQ=0.022 ! Non-dimensional heat-transfer coefficient
-real :: melt_cutoff=-1.0 ! Minimum ocean thickness for melting to occur (is not applied for values < 0)
-logical :: const_gamma=.True. ! If true uses a constant heat transfer coefficient, from which the salt transfer is calculated
-logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
-logical :: add_weight_to_ocean=.true. ! Add weight of particles + bits to ocean
-logical :: passive_mode=.false. ! Add weight of particles + bits to ocean
-logical :: time_average_weight=.false. ! Time average the weight on the ocean
-real :: speed_limit=0. ! CFL speed limit for a part
-real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
-real :: tip_parameter=0. ! Parameter to override particle rolling critical ratio (use zero to get parameter directly from ice and seawater densities
-real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True. ! True=Runge Kutta, False=Verlet.
-logical :: use_mixed_melting=.False. ! If true, then the melt is determined partly using 3 eq model partly using particle parameterizations (according to particle bond number)
-logical :: apply_thickness_cutoff_to_gridded_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
-logical :: apply_thickness_cutoff_to_parts_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to parts)
-logical :: use_updated_rolling_scheme=.false. ! Use the corrected Rolling Scheme rather than the erroneous one
-logical :: pass_fields_to_ocean_model=.False. ! particle area, mass and ustar fields are prepared to pass to ocean model
-logical :: use_mixed_layer_salinity_for_thermo=.False. ! If true, then model uses ocean salinity for 3 and 2 equation melt model.
-logical :: find_melt_using_spread_mass=.False. ! If true, then the model calculates ice loss by looping at the spread_mass before and after.
-logical :: Use_three_equation_model=.True. ! Uses 3 equation model for melt when ice shelf type thermodynamics are used.
-logical :: melt_particles_as_ice_shelf=.False. ! Uses iceshelf type thermodynamics
-logical :: particle_melt_without_decay=.False. ! Allows particles meltwater fluxes to enter the ocean, without the particle decaying or changing shape.
-logical :: add_particle_thickness_to_SSH=.False. ! Adds the particle contribution to SSH.
-logical :: override_particle_velocities=.False. ! Allows you to set a fixed particle velocity for all non-static particles.
-logical :: use_f_plane=.False. ! Flag to use a f-plane for the rotation
 logical :: grid_is_latlon=.True. ! True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
 logical :: grid_is_regular=.True. ! Flag to say whether point in cell can be found assuming regular Cartesian grid
-logical :: rotate_particles_for_mass_spreading=.True. ! Flag allows particles to rotate for spreading their mass (in hexagonal spreading mode)
-logical :: set_melt_rates_to_zero=.False. ! Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
-logical :: allow_parts_to_roll=.True. ! Allows particles to roll over when rolling conditions are met
-logical :: hexagonal_particles=.False. ! True treats particles as rectangles, False as hexagonal elements (for the purpose of mass spreading)
 logical :: ignore_missing_restart_parts=.False. ! True Allows the model to ignore particles missing in the restart.
-logical :: Static_particles=.False. ! True= particles do no move
-logical :: only_interactive_forces=.False. ! particles only feel interactive forces, and not ocean, wind...
 logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
 logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in particle_trajectory.nc
 logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
-logical :: particle_bonds_on=.False. ! True=Allow particles to have s, False=don't allow.
-logical :: manually_initialize_bonds=.False. ! True= Bonds are initialize manually.
 logical :: use_new_predictive_corrective =.False. ! Flag to use Bob's predictive corrective particle scheme- Added by Alon
-logical :: interactive_particles_on=.false. ! Turn on/off interactions between particles  - Added by Alon
-logical :: critical_interaction_damping_on=.true. ! Sets the damping on relative particle velocity to critical value - Added by Alon
 logical :: do_unit_tests=.false. ! Conduct some unit tests
 logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
 logical :: read_old_restarts=.false. ! Legacy option that does nothing
-logical :: use_old_spreading=.true. ! If true, spreads particle mass as if the part is one grid cell wide
-logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
-real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between particle classes (kg)
-real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) ,
-real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real particle mass (non-dim)
-real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved parts (m)
 integer(kind=8) :: debug_particle_with_id = -1 ! If positive, monitors a part with this id
 
-namelist /particles_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_particles,  &
-         distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
-         rho_parts, LoW_ratio, debug, really_debug, use_operator_splitting, party_bit_erosion_fraction, particle_bonds_on, manually_initialize_bonds, ignore_missing_restart_parts, &
-         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_particles, &
-         time_average_weight, generate_test_particles, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_particles_on, critical_interaction_damping_on, &
-         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
-         allow_parts_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_particles_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
-         grid_is_regular,override_particle_velocities,u_override,v_override,add_particle_thickness_to_SSH,particle_melt_without_decay,melt_particles_as_ice_shelf, &
-         Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_particles,ustar_particles_bg,cdrag_particles, pass_fields_to_ocean_model, &
-         const_gamma, Gamma_T_3EQ, ignore_traj, debug_particle_with_id,use_updated_rolling_scheme, tip_parameter, read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,&
-         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_parts_melt,use_mixed_melting
+namelist /particles_nml/ verbose, halo,  traj_sample_hrs, traj_write_hrs, save_short_traj,  &
+         verbose_hrs,  &
+         debug, really_debug, ignore_missing_restart_parts, &
+         parallel_reprod, use_slow_find, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, &
+         generate_test_particles, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, &
+         restart_input_dir, orig_read, old_bug_bilin,do_unit_tests, force_all_pes_traj, &
+         grid_is_latlon,Lx, &
+         grid_is_regular, &
+         ignore_traj, debug_particle_with_id, read_old_restarts
+         
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -501,7 +300,7 @@ type(particles_gridded), pointer :: grd
 real :: lon_mod, big_number
 logical :: lerr
 integer :: stdlogunit, stderrunit
-real :: Total_mass  !Added by Alon
+
 
   ! Get the stderr and stdlog unit numbers
   stderrunit=stderr()
@@ -534,29 +333,15 @@ real :: Total_mass  !Added by Alon
 
 ! Clocks
   parts%clock=mpp_clock_id( 'Particles', flags=clock_flag_default, grain=CLOCK_COMPONENT )
-  parts%clock_mom=mpp_clock_id( 'Particles-momentum', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_the=mpp_clock_id( 'Particles-thermodyn', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_int=mpp_clock_id( 'Particles-interface', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_cal=mpp_clock_id( 'Particles-calving', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   parts%clock_com=mpp_clock_id( 'Particles-communication', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   parts%clock_ini=mpp_clock_id( 'Particles-initialization', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   parts%clock_ior=mpp_clock_id( 'Particles-I/O read', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   parts%clock_iow=mpp_clock_id( 'Particles-I/O write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  parts%clock_dia=mpp_clock_id( 'Particles-diagnostics', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+
 
   call mpp_clock_begin(parts%clock)
   call mpp_clock_begin(parts%clock_ini)
 
-! Set up particle domain
- !write(stderrunit,*) 'diamonds: defining domain'
-!  call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
-!                           maskmap=maskmap, &
-!                           xflags=dom_x_flags, xhalo=halo,  &
-!                           yflags=dom_y_flags, yhalo=halo, name='diamond')
-
-!  call mpp_define_io_domain(grd%domain, io_layout)
-
- !write(stderrunit,*) 'diamond: get compute domain'
   call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
   call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
   call mpp_get_global_domain( grd%domain, grd%isg, grd%ieg, grd%jsg, grd%jeg )
@@ -568,14 +353,6 @@ real :: Total_mass  !Added by Alon
 
 
   folded_north_on_pe = ((Grid%Domain%y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == Grid%HI%jeg-Grid%HI%jsg+1))
- !write(stderrunit,'(a,6i4)') 'diamonds, particles_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
-
- !if (verbose) &
- !write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, particles_init: (',mpp_pe(),') [ij][se]c=', &
- !     grd%isc,grd%iec,grd%jsc,grd%jec, &
- !     ' [lon|lat][min|max]=', minval(ice_lon),maxval(ice_lon),minval(ice_lat),maxval(ice_lat)
- !write(stderrunit,*) 'diamonds, int args = ', mpp_pe(),gni, gnj, layout, axes
-
  ! Allocate grid of pointers
   allocate( parts%list(grd%isd:grd%ied, grd%jsd:grd%jed) )
   do j = grd%jsd,grd%jed ; do i = grd%isd,grd%ied
@@ -603,37 +380,12 @@ real :: Total_mass  !Added by Alon
   allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
   allocate( grd%particle_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%particle_counter_grd(:,:)=0
 
- !write(stderrunit,*) 'diamonds: copying grid'
-  ! Copy data declared on ice model computational domain
+
   is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
   grd%lon(is:ie,js:je)=Grid%geolonT(is:ie,js:je)
   grd%lat(is:ie,js:je)=Grid%geolatT(is:ie,js:je)
   grd%area(is:ie,js:je)=Grid%areaT(is:ie,js:je) !sis2 has *(4.*pi*radius*radius)
-
-  !!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!
-  !if (mpp_pe().eq.5) then
-  ! write(stderrunit,'(a3,32i7)') 'LB',(i,i=grd%isd,grd%ied)
-  ! do j=grd%jed,grd%jsd,-1
-  !   write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
-  ! enddo
-  ! write(stderrunit,'(a3,32i7)') 'Ice lon',(i,i=grd%isd,grd%ied)
-  ! do j=grd%jed,grd%jsd,-1
-  !   write(stderrunit,'(i3,32f7.1)') j,(ice_lon(i,j),i=grd%isd,grd%ied)
-  ! enddo
-  ! write(stderrunit,'(a3,32i7)') 'LA',(i,i=grd%isd,grd%ied)
-  ! do j=grd%jed,grd%jsd,-1
-  !   write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
-  ! enddo
-  !endif
-  !!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!
-
-  !For SIS not to change answers
-!  if(present(fractional_area)) then
-!    if(fractional_area) grd%area(is:ie,js:je)=ice_area(is:ie,js:je) *(4.*pi*radius*radius)
-!  endif
- ! if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(is:ie,js:je)
   grd%ocean_depth(is:ie,js:je) = Grid%bathyT(is:ie,js:je)
-  ! Copy data declared on ice model data domain
   is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
   grd%dx(is:ie,js:je)=Grid%dxT(is:ie,js:je)
   grd%dy(is:ie,js:je)=Grid%dyT(is:ie,js:je)
@@ -736,22 +488,6 @@ real :: Total_mass  !Added by Alon
          grd%isc,grd%iec,grd%jsc,grd%jec, &
          ' [lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
   endif
-
- !if (mpp_pe().eq.5) then
- !  write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
- !  enddo
- !  write(stderrunit,'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
- !  enddo
- !  write(stderrunit,'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
- !  enddo
- !endif
-
 ! Final check for NaN's in the latlon grid:
   do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
     if (grd%lat(i,j) .ne. grd%lat(i,j)) then
@@ -764,43 +500,6 @@ real :: Total_mass  !Added by Alon
     endif
   enddo; enddo
 
-
-!Added by Alon  - If a freq distribution is input, we have to convert the freq distribution to a mass flux distribution)
-if (input_freq_distribution) then
-     Total_mass=0.
-     do j=1,nclasses
-          Total_mass=Total_mass+(distribution(j)*initial_mass(j))
-     enddo
-     do j=1,nclasses
-           distribution(j)=(distribution(j)*initial_mass(j))/Total_mass
-     enddo
-endif
-
-if ((halo .lt. 3) .and. (rotate_particles_for_mass_spreading .and. particle_bonds_on) )   then
-    halo=3
-    call error_mesg('diamonds, framework', 'Setting particle halos =3, since halos must be >= 3 for rotating particles for mass spreading', WARNING)
-elseif  ((halo .lt. 2) .and. (interactive_particles_on .or. particle_bonds_on) )   then
-    halo=2
-    call error_mesg('diamonds, framework', 'Setting particle halos =2, since halos must be >= 2 for interactions', WARNING)
-endif
-
-if (interactive_particles_on) then
-  if (Runge_not_Verlet) then
-    !Runge_not_Verlet=.false.  ! particle interactions only with Verlet
-    call error_mesg('diamonds, framework', 'It is unlcear whther interactive particles work with Runge Kutta stepping.', WARNING)
-  endif
-endif
-if (.not.interactive_particles_on) then
-  if (particle_bonds_on) then
-    !particle_bonds_on=.false.
-    call error_mesg('diamonds, framework', 'Interactive particles off requires particle bonds off (turning bonds off).', WARNING)
-  endif
-endif
-if (.not. particle_bonds_on) then
-   max_bonds=0
-else
-  buffer_width=buffer_width+(max_bonds*4) ! Increase buffer width to include bonds being passed between processors
-endif
 if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
 
@@ -816,101 +515,11 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   parts%grd%Lx=Lx
   parts%grd%grid_is_latlon=grid_is_latlon
   parts%grd%grid_is_regular=grid_is_regular
-  parts%max_bonds=max_bonds
-  parts%rho_parts=rho_parts
-  parts%spring_coef=spring_coef
-  parts%bond_coef=bond_coef
-  parts%radial_damping_coef=radial_damping_coef
-  parts%tangental_damping_coef=tangental_damping_coef
-  parts%LoW_ratio=LoW_ratio
-  parts%use_operator_splitting=use_operator_splitting
-  parts%party_bit_erosion_fraction=party_bit_erosion_fraction
-  parts%sicn_shift=sicn_shift
-  parts%passive_mode=passive_mode
-  parts%time_average_weight=time_average_weight
-  parts%speed_limit=speed_limit
-  parts%tau_calving=tau_calving
-  parts%tip_parameter=tip_parameter
-  parts%use_updated_rolling_scheme=use_updated_rolling_scheme  !Alon
   parts%Runge_not_Verlet=Runge_not_Verlet
-  parts%use_mixed_melting=use_mixed_melting
-  parts%apply_thickness_cutoff_to_parts_melt=apply_thickness_cutoff_to_parts_melt
-  parts%apply_thickness_cutoff_to_gridded_melt=apply_thickness_cutoff_to_gridded_melt
-  parts%melt_cutoff=melt_cutoff
-  parts%read_ocean_depth_from_file=read_ocean_depth_from_file
-  parts%const_gamma=const_gamma
-  parts%Gamma_T_3EQ=Gamma_T_3EQ
-  parts%pass_fields_to_ocean_model=pass_fields_to_ocean_model
-  parts%ustar_particles_bg=ustar_particles_bg
-  parts%utide_particles=utide_particles
-  parts%cdrag_particles=cdrag_particles
-  parts%use_mixed_layer_salinity_for_thermo=use_mixed_layer_salinity_for_thermo
-  parts%find_melt_using_spread_mass=find_melt_using_spread_mass
-  parts%Use_three_equation_model=Use_three_equation_model
-  parts%melt_particles_as_ice_shelf=melt_particles_as_ice_shelf
-  parts%particle_melt_without_decay=particle_melt_without_decay
-  parts%add_particle_thickness_to_SSH=add_particle_thickness_to_SSH
-  parts%override_particle_velocities=override_particle_velocities
-  parts%use_f_plane=use_f_plane
-  parts%rotate_particles_for_mass_spreading=rotate_particles_for_mass_spreading
-  parts%lat_ref=lat_ref
-  parts%u_override=u_override
-  parts%v_override=v_override
-  parts%initial_orientation=initial_orientation
-  parts%set_melt_rates_to_zero=set_melt_rates_to_zero
-  parts%allow_parts_to_roll=allow_parts_to_roll
-  parts%hexagonal_particles=hexagonal_particles
   parts%ignore_missing_restart_parts=ignore_missing_restart_parts
-  parts%Static_particles=Static_particles
-  parts%only_interactive_forces=only_interactive_forces
-  parts%halo_debugging=halo_debugging
-  parts%particle_bonds_on=particle_bonds_on   !Alon
-  parts%manually_initialize_bonds=manually_initialize_bonds   !Alon
-  parts%critical_interaction_damping_on=critical_interaction_damping_on   !Alon
-  parts%interactive_particles_on=interactive_particles_on   !Alon
   parts%use_new_predictive_corrective=use_new_predictive_corrective  !Alon
-  parts%grounding_fraction=grounding_fraction
-  parts%add_weight_to_ocean=add_weight_to_ocean
-  parts%use_old_spreading=use_old_spreading
   parts%debug_particle_with_id=debug_particle_with_id
-  allocate( parts%initial_mass(nclasses) ); parts%initial_mass(:)=initial_mass(:)
-  allocate( parts%distribution(nclasses) ); parts%distribution(:)=distribution(:)
-  allocate( parts%mass_scaling(nclasses) ); parts%mass_scaling(:)=mass_scaling(:)
-  allocate( parts%initial_thickness(nclasses) ); parts%initial_thickness(:)=initial_thickness(:)
-  allocate( parts%initial_width(nclasses) )
-  allocate( parts%initial_length(nclasses) )
-  parts%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_parts*initial_thickness(:)))
-  parts%initial_length(:)=LoW_ratio*parts%initial_width(:)
 
-  if (read_old_restarts) call error_mesg('diamonds, ice_parts_framework_init', 'Setting "read_old_restarts=.true." is obsolete and does nothing!', WARNING)
-
-  ! Diagnostics
-!  id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'particle mass')
-!  axes3d(1:2)=diag_axes%axesT1%handles(1:2)
-!  axes3d(3)=id_class
-!  grd%id_uo=register_diag_field('particles', 'uo', diag_axes%axesT1, Time, &
-!     'Ocean zonal component of velocity', 'm s^-1')
-!  grd%id_vo=register_diag_field('particles', 'vo', diag_axes%axesT1, Time, &
-!     'Ocean meridional component of velocity', 'm s^-1')
-!  grd%id_ocean_depth=register_diag_field('particles', 'Depth', diag_axes%axesT1, Time, &
-!     'Ocean Depth', 'm')
-
-  ! Static fields
-  ! id_class=register_static_field('particles', 'lon', diag_axes%axesT1, &
-  !              'longitude (corners)', 'degrees_E')
-  ! if (id_class>0) lerr=send_data(id_class, grd%lon(grd%isc:grd%iec,grd%jsc:grd%jec))
-  ! id_class=register_static_field('particles', 'lat', diag_axes%axesT1, &
-  !              'latitude (corners)', 'degrees_N')
-  ! if (id_class>0) lerr=send_data(id_class, grd%lat(grd%isc:grd%iec,grd%jsc:grd%jec))
-  ! id_class=register_static_field('particles', 'area', diag_axes%axesT1, &
-  !              'cell area', 'm^2')
-  ! if (id_class>0) lerr=send_data(id_class, grd%area(grd%isc:grd%iec,grd%jsc:grd%jec))
-  ! id_class=register_static_field('particles', 'mask', diag_axes%axesT1, &
-  !              'wet point mask', 'none')
-  ! if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
-  ! id_class=register_static_field('particles', 'ocean_depth_static', diag_axes%axesT1, &
-  !              'ocean depth static', 'm')
-  ! if (id_class>0) lerr=send_data(id_class, grd%ocean_depth(grd%isc:grd%iec,grd%jsc:grd%jec))
 
   if (debug) then
     call grd_chksum2(grd, grd%lon, 'init lon')
@@ -1061,7 +670,6 @@ logical :: halo_debugging
       enddo
     enddo; enddo
     ! Use when debugging:
-    call show_all_bonds(parts)
   endif
 
   ! Step 1: Clear the current halos
@@ -1115,7 +723,7 @@ logical :: halo_debugging
       nparts_to_send_e=nparts_to_send_e+1
       current_halo_status=kick_the_bucket%halo_part
       kick_the_bucket%halo_part=1.
-      call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_e, nparts_to_send_e, parts%max_bonds)
+      call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_e, nparts_to_send_e)
       kick_the_bucket%halo_part=current_halo_status
     enddo
   enddo; enddo
@@ -1129,7 +737,7 @@ logical :: halo_debugging
       nparts_to_send_w=nparts_to_send_w+1
       current_halo_status=kick_the_bucket%halo_part
       kick_the_bucket%halo_part=1.
-      call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_w, nparts_to_send_w, parts%max_bonds)
+      call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_w, nparts_to_send_w)
       kick_the_bucket%halo_part=current_halo_status
     enddo
   enddo; enddo
@@ -1161,7 +769,7 @@ logical :: halo_debugging
       call increase_ibuffer(parts%ibuffer_w, nparts_rcvd_from_w,buffer_width)
       call mpp_recv(parts%ibuffer_w%data, nparts_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
       do i=1, nparts_rcvd_from_w
-        call unpack_part_from_buffer2(parts, parts%ibuffer_w, i, grd, max_bonds_in=parts%max_bonds )
+        call unpack_part_from_buffer2(parts, parts%ibuffer_w, i, grd )
       enddo
     endif
   else
@@ -1179,7 +787,7 @@ logical :: halo_debugging
       call increase_ibuffer(parts%ibuffer_e, nparts_rcvd_from_e,buffer_width)
       call mpp_recv(parts%ibuffer_e%data, nparts_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
       do i=1, nparts_rcvd_from_e
-        call unpack_part_from_buffer2(parts, parts%ibuffer_e, i, grd, max_bonds_in=parts%max_bonds )
+        call unpack_part_from_buffer2(parts, parts%ibuffer_e, i, grd )
       enddo
     endif
   else
@@ -1199,7 +807,7 @@ logical :: halo_debugging
       nparts_to_send_n=nparts_to_send_n+1
       current_halo_status=kick_the_bucket%halo_part
       kick_the_bucket%halo_part=1.
-      call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_n, nparts_to_send_n, parts%max_bonds )
+      call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_n, nparts_to_send_n )
       kick_the_bucket%halo_part=current_halo_status
     enddo
   enddo; enddo
@@ -1213,7 +821,7 @@ logical :: halo_debugging
       nparts_to_send_s=nparts_to_send_s+1
       current_halo_status=kick_the_bucket%halo_part
       kick_the_bucket%halo_part=1.
-      call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_s, nparts_to_send_s,parts%max_bonds )
+      call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_s, nparts_to_send_s )
       kick_the_bucket%halo_part=current_halo_status
     enddo
   enddo; enddo
@@ -1253,7 +861,7 @@ logical :: halo_debugging
       call increase_ibuffer(parts%ibuffer_s, nparts_rcvd_from_s,buffer_width)
       call mpp_recv(parts%ibuffer_s%data, nparts_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
       do i=1, nparts_rcvd_from_s
-        call unpack_part_from_buffer2(parts, parts%ibuffer_s, i, grd, max_bonds_in=parts%max_bonds  )
+        call unpack_part_from_buffer2(parts, parts%ibuffer_s, i, grd  )
       enddo
     endif
   else
@@ -1279,7 +887,7 @@ logical :: halo_debugging
         call mpp_recv(parts%ibuffer_n%data, nparts_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
       endif
       do i=1, nparts_rcvd_from_n
-        call unpack_part_from_buffer2(parts, parts%ibuffer_n, i, grd, max_bonds_in=parts%max_bonds )
+        call unpack_part_from_buffer2(parts, parts%ibuffer_n, i, grd )
       enddo
     endif
   else
@@ -1296,7 +904,6 @@ logical :: halo_debugging
         this=>this%next
       enddo
     enddo; enddo
-    call show_all_bonds(parts)
   endif
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1343,127 +950,6 @@ logical :: halo_debugging
 
 end subroutine update_halo_particles
 
-! #############################################################################
-subroutine form_a_bond(part, other_id, other_part_ine, other_part_jne, other_part)
-! Arguments
-type(particle), pointer :: part
-type(particle), optional,  pointer :: other_part
-type(bond) , pointer :: new_bond, first_bond
-integer(kind=8), intent(in) :: other_id
-integer, optional  :: other_part_ine, other_part_jne
-integer :: stderrunit
-
- stderrunit = stderr()
-
-if (part%id .ne. other_id) then
-
- !write (stderrunit,*) , 'Forming a bond!!!', mpp_pe(), part%id, other_id, part%halo_part, part%ine, part%jne
-
-  ! Step 1: Create a new bond
-  allocate(new_bond)
-  new_bond%other_id=other_id
-  if(present(other_part)) then
-    new_bond%other_part=>other_part
-    new_bond%other_part_ine=other_part%ine
-    new_bond%other_part_jne=other_part%jne
-  else
-    new_bond%other_part=>null()
-    if (present(other_part_ine)) then
-      new_bond%other_part_ine=other_part_ine
-      new_bond%other_part_jne=other_part_jne
-    endif
-  endif
-
-  ! Step 2: Put this new bond at the start of the bond list
-   first_bond=>part%first_bond
-   if (associated(first_bond)) then
-        new_bond%next_bond=>first_bond
-        new_bond%prev_bond=>null()  !This should not be needed
-        first_bond%prev_bond=>new_bond
-        part%first_bond=>new_bond
-   else
-       new_bond%next_bond=>null()  !This should not be needed
-       new_bond%prev_bond=>null()  !This should not be needed
-       part%first_bond=>new_bond
-   endif
-   new_bond=>null()
- else
-   call error_mesg('diamonds, bonds', 'An particle is trying to bond with itself!!!', FATAL)
- endif
-
-end subroutine form_a_bond
-
-! #############################################################################
-
-subroutine bond_address_update(parts)
-! Arguments
-type(particles), pointer :: parts !< Container for all types and memory
-type(particle), pointer :: other_part, part
-type(particles_gridded), pointer :: grd
-integer :: grdi, grdj, nbonds
-type(bond) , pointer :: current_bond
-
- ! For convenience
-  grd=>parts%grd
-
-  ! This could be done for only the parts near the halos
-  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
-    part=>parts%list(grdi,grdj)%first
-    do while (associated(part)) ! loop over all parts
-      current_bond=>part%first_bond
-      do while (associated(current_bond)) ! loop over all bonds
-        if  (associated(current_bond%other_part)) then
-          current_bond%other_part_ine=current_bond%other_part%ine
-          current_bond%other_part_jne=current_bond%other_part%jne
-        else
-          if (part%halo_part .lt. 0.5) then
-            call error_mesg('diamonds, bond address update', 'other part in bond not assosiated!', FATAL)
-          endif
-        endif
-        current_bond=>current_bond%next_bond
-      enddo
-      part=>part%next
-    enddo
-  enddo; enddo
-
-  call mpp_sync_self()
-
-end subroutine bond_address_update
-
-subroutine show_all_bonds(parts)
-type(particles), pointer :: parts !< Container for all types and memory
-type(particle), pointer :: other_part, part
-type(particles_gridded), pointer :: grd
-integer :: grdi, grdj, nbonds
-type(bond) , pointer :: current_bond
-
- ! For convenience
-  grd=>parts%grd
-
-  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
-    part=>parts%list(grdi,grdj)%first
-    do while (associated(part)) ! loop over all parts
-      current_bond=>part%first_bond
-      do while (associated(current_bond)) ! loop over all bonds
-        print *, 'Show Bond1 :', part%id, current_bond%other_id, current_bond%other_part_ine, current_bond%other_part_jne,  mpp_pe()
-        !print *, 'Current:', part%id, part%ine, part%jne,part%halo_part, mpp_pe()
-        if  (associated(current_bond%other_part)) then
-          if (current_bond%other_part%id .ne. current_bond%other_id) then
-            print *, 'Bond matching', part%id,current_bond%other_part%id, current_bond%other_id,&
-            part%halo_part,current_bond%other_part%halo_part ,mpp_pe()
-            call error_mesg('diamonds, show all bonds:', 'The bonds are not matching properly!', FATAL)
-          endif
-        else
-            print *, 'This bond has an non-assosiated other part :', part%id, current_bond%other_id,&
-            current_bond%other_part_ine, current_bond%other_part_jne, part%halo_part,  mpp_pe()
-        endif
-        current_bond=>current_bond%next_bond
-      enddo
-      part=>part%next
-    enddo
-  enddo; enddo
-
-end subroutine show_all_bonds
 
 ! #############################################################################
 !> Destroys all parts in a list
@@ -1521,14 +1007,14 @@ integer :: grdi, grdj
           kick_the_bucket=>this
           this=>this%next
           nparts_to_send_e=nparts_to_send_e+1
-          call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_e, nparts_to_send_e, parts%max_bonds  )
+          call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_e, nparts_to_send_e  )
           call move_trajectory(parts, kick_the_bucket)
           call delete_particle_from_list(parts%list(grdi,grdj)%first,kick_the_bucket)
         elseif (this%ine.lt.parts%grd%isc) then
           kick_the_bucket=>this
           this=>this%next
           nparts_to_send_w=nparts_to_send_w+1
-          call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_w, nparts_to_send_w, parts%max_bonds  )
+          call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_w, nparts_to_send_w  )
           call move_trajectory(parts, kick_the_bucket)
           call delete_particle_from_list(parts%list(grdi,grdj)%first,kick_the_bucket)
         else
@@ -1567,7 +1053,7 @@ integer :: grdi, grdj
       call increase_ibuffer(parts%ibuffer_w, nparts_rcvd_from_w,buffer_width)
       call mpp_recv(parts%ibuffer_w%data, nparts_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
       do i=1, nparts_rcvd_from_w
-        call unpack_part_from_buffer2(parts, parts%ibuffer_w, i, grd, max_bonds_in=parts%max_bonds  )
+        call unpack_part_from_buffer2(parts, parts%ibuffer_w, i, grd )
       enddo
     endif
   else
@@ -1585,7 +1071,7 @@ integer :: grdi, grdj
       call increase_ibuffer(parts%ibuffer_e, nparts_rcvd_from_e,buffer_width)
       call mpp_recv(parts%ibuffer_e%data, nparts_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
       do i=1, nparts_rcvd_from_e
-        call unpack_part_from_buffer2(parts, parts%ibuffer_e, i, grd, max_bonds_in=parts%max_bonds)
+        call unpack_part_from_buffer2(parts, parts%ibuffer_e, i, grd)
       enddo
     endif
   else
@@ -1606,14 +1092,14 @@ integer :: grdi, grdj
           kick_the_bucket=>this
           this=>this%next
           nparts_to_send_n=nparts_to_send_n+1
-          call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_n, nparts_to_send_n,parts%max_bonds)
+          call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_n, nparts_to_send_n)
           call move_trajectory(parts, kick_the_bucket)
           call delete_particle_from_list(parts%list(grdi,grdj)%first,kick_the_bucket)
         elseif (this%jne.lt.parts%grd%jsc) then
           kick_the_bucket=>this
           this=>this%next
           nparts_to_send_s=nparts_to_send_s+1
-          call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_s, nparts_to_send_s,parts%max_bonds)
+          call pack_part_into_buffer2(kick_the_bucket, parts%obuffer_s, nparts_to_send_s)
           call move_trajectory(parts, kick_the_bucket)
           call delete_particle_from_list(parts%list(grdi,grdj)%first,kick_the_bucket)
         else
@@ -1660,7 +1146,7 @@ integer :: grdi, grdj
       call increase_ibuffer(parts%ibuffer_s, nparts_rcvd_from_s,buffer_width)
       call mpp_recv(parts%ibuffer_s%data, nparts_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
       do i=1, nparts_rcvd_from_s
-        call unpack_part_from_buffer2(parts, parts%ibuffer_s, i, grd, max_bonds_in=parts%max_bonds )
+        call unpack_part_from_buffer2(parts, parts%ibuffer_s, i, grd )
       enddo
     endif
   else
@@ -1686,7 +1172,7 @@ integer :: grdi, grdj
          call mpp_recv(parts%ibuffer_n%data, nparts_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
       endif
       do i=1, nparts_rcvd_from_n
-        call unpack_part_from_buffer2(parts, parts%ibuffer_n, i, grd, max_bonds_in=parts%max_bonds)
+        call unpack_part_from_buffer2(parts, parts%ibuffer_n, i, grd)
       enddo
     endif
   else
@@ -1739,19 +1225,17 @@ integer :: grdi, grdj
 end subroutine send_parts_to_other_pes
 
 !> Pack a part into a buffer
-subroutine pack_part_into_buffer2(part, buff, n, max_bonds_in)
+subroutine pack_part_into_buffer2(part, buff, n)
 ! Arguments
 type(particle), pointer :: part !< particle to pack into buffer
 type(buffer), pointer :: buff !< Buffer to pack part into
 integer, intent(in) :: n !< Position in buffer to place part
-integer, optional :: max_bonds_in !< <undocumented>
 !integer, intent(in) :: max_bonds  ! Change this later
 ! Local variables
 integer :: counter, k, max_bonds, id_cnt, id_ij
-type(bond), pointer :: current_bond
+
 
   max_bonds=0
-  if (present(max_bonds_in)) max_bonds=max_bonds_in
 
   if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width)
   if (n>buff%size) call increase_ibuffer(buff,n,buffer_width)
@@ -1767,14 +1251,6 @@ type(bond), pointer :: current_bond
   call push_buffer_value(buff%data(:,n), counter, part%start_lat)
   call push_buffer_value(buff%data(:,n), counter, part%start_year)
   call push_buffer_value(buff%data(:,n), counter, part%start_day)
-  call push_buffer_value(buff%data(:,n), counter, part%start_mass)
-  call push_buffer_value(buff%data(:,n), counter, part%mass)
-  call push_buffer_value(buff%data(:,n), counter, part%thickness)
-  call push_buffer_value(buff%data(:,n), counter, part%width)
-  call push_buffer_value(buff%data(:,n), counter, part%length)
-  call push_buffer_value(buff%data(:,n), counter, part%mass_scaling)
-  call push_buffer_value(buff%data(:,n), counter, part%mass_of_bits)
-  call push_buffer_value(buff%data(:,n), counter, part%heat_density)
   call push_buffer_value(buff%data(:,n), counter, part%ine)
   call push_buffer_value(buff%data(:,n), counter, part%jne)
   call push_buffer_value(buff%data(:,n), counter, part%axn)
@@ -1782,34 +1258,7 @@ type(bond), pointer :: current_bond
   call push_buffer_value(buff%data(:,n), counter, part%bxn)
   call push_buffer_value(buff%data(:,n), counter, part%byn)
   call push_buffer_value(buff%data(:,n), counter, part%halo_part)
-  call push_buffer_value(buff%data(:,n), counter, part%static_part)
-  call split_id(part%id, id_cnt, id_ij)
-  call push_buffer_value(buff%data(:,n), counter, id_cnt)
-  call push_buffer_value(buff%data(:,n), counter, id_ij)
 
-  if (max_bonds .gt. 0) then
-    current_bond=>part%first_bond
-    do k = 1,max_bonds
-      if (associated(current_bond)) then
-        call split_id(current_bond%other_id, id_cnt, id_ij)
-        call push_buffer_value(buff%data(:,n), counter, id_cnt)
-        call push_buffer_value(buff%data(:,n), counter, id_ij)
-        call push_buffer_value(buff%data(:,n), counter, current_bond%other_part_ine)
-        call push_buffer_value(buff%data(:,n), counter, current_bond%other_part_jne)
-        current_bond=>current_bond%next_bond
-      else
-        call push_buffer_value(buff%data(:,n), counter, 0)
-        call push_buffer_value(buff%data(:,n), counter, 0)
-        call push_buffer_value(buff%data(:,n), counter, 0)
-        call push_buffer_value(buff%data(:,n), counter, 0)
-      endif
-    enddo
-  endif
-
-  ! Clearing part pointer from partner bonds
-  !if (part%halo_part .lt. 0.5) then
-  !  call clear_part_from_partners_bonds(part)
-  !endif
 
 end subroutine pack_part_into_buffer2
 
@@ -1888,14 +1337,14 @@ end subroutine pull_buffer_ivalue
   end subroutine increase_buffer
 
   !> Unpacks a part entry from a buffer to a new part
-subroutine unpack_part_from_buffer2(parts, buff, n, grd, force_append, max_bonds_in)
+subroutine unpack_part_from_buffer2(parts, buff, n, grd, force_append)
 ! Arguments
 type(particles), pointer :: parts !< Container for all types and memory
 type(buffer), pointer :: buff !< Buffer from which to unpack part
 integer, intent(in) :: n !< Position in buffer to unpack
 type(particles_gridded), pointer :: grd !< Container for gridded fields
 logical, optional :: force_append !< <undocumented>
-integer, optional :: max_bonds_in !< <undocumented>
+
 ! Local variables
 !real :: lon, lat, uvel, vvel, xi, yj
 !real :: start_lon, start_lat, start_day, start_mass
@@ -1915,7 +1364,6 @@ logical :: quick
 
   quick=.false.
   max_bonds=0
-  if (present(max_bonds_in)) max_bonds=max_bonds_in
 
   force_app = .false.
   if(present(force_append)) force_app = force_append
@@ -1931,14 +1379,6 @@ logical :: quick
   call pull_buffer_value(buff%data(:,n), counter, localpart%start_lat)
   call pull_buffer_value(buff%data(:,n), counter, localpart%start_year)
   call pull_buffer_value(buff%data(:,n), counter, localpart%start_day)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%start_mass)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%mass)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%thickness)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%width)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%length)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%mass_scaling)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%mass_of_bits)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%heat_density)
   call pull_buffer_value(buff%data(:,n), counter, localpart%ine)
   call pull_buffer_value(buff%data(:,n), counter, localpart%jne)
   call pull_buffer_value(buff%data(:,n), counter, localpart%axn)
@@ -1946,10 +1386,7 @@ logical :: quick
   call pull_buffer_value(buff%data(:,n), counter, localpart%bxn)
   call pull_buffer_value(buff%data(:,n), counter, localpart%byn)
   call pull_buffer_value(buff%data(:,n), counter, localpart%halo_part)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%static_part)
-  call pull_buffer_value(buff%data(:,n), counter, id_cnt)
-  call pull_buffer_value(buff%data(:,n), counter, id_ij)
-  localpart%id = id_from_2_ints(id_cnt, id_ij)
+
 
   !These quantities no longer need to be passed between processors
   localpart%uvel_old=localpart%uvel
@@ -1991,20 +1428,6 @@ logical :: quick
     endif
   endif
 
-  !#  Do stuff to do with bonds here MP1
-  this%first_bond=>null()
-  if (max_bonds .gt. 0) then
-    do k = 1,max_bonds
-      call pull_buffer_value(buff%data(:,n), counter, id_cnt)
-      call pull_buffer_value(buff%data(:,n), counter, id_ij)
-      id = id_from_2_ints(id_cnt, id_ij)
-      call pull_buffer_value(buff%data(:,n), counter, other_part_ine)
-      call pull_buffer_value(buff%data(:,n), counter, other_part_jne)
-      if (id_ij > 0) then
-        call form_a_bond(this, id, other_part_ine, other_part_jne)
-      endif
-    enddo
-  endif
   this=>null()
 
 end subroutine unpack_part_from_buffer2
@@ -2128,8 +1551,6 @@ end subroutine increase_ibuffer
     buff%data(4,n)=traj%day
     buff%data(5,n)=traj%uvel
     buff%data(6,n)=traj%vvel
-    buff%data(13,n)=traj%uo
-    buff%data(14,n)=traj%vo
     buff%data(24,n)=traj%axn !Alon
     buff%data(25,n)=traj%ayn !Alon
     buff%data(26,n)=traj%bxn !Alon
@@ -2159,8 +1580,6 @@ end subroutine increase_ibuffer
     traj%day=buff%data(4,n)
     traj%uvel=buff%data(5,n)
     traj%vvel=buff%data(6,n)
-    traj%uo=buff%data(7,n)
-    traj%vo=buff%data(8,n)
     traj%axn=buff%data(9,n) !Alon
     traj%ayn=buff%data(10,n) !Alon
     traj%bxn=buff%data(11,n) !Alon
@@ -2416,13 +1835,6 @@ type(particle), pointer :: part1, part2
     inorder=.false.
     return
   endif
-  if (part1%start_mass<part2%start_mass) then ! want lightest first
-    inorder=.true.
-    return
-  else if (part1%start_mass>part2%start_mass) then
-    inorder=.false.
-    return
-  endif
   if (part1%start_lon<part2%start_lon) then ! want eastward first
     inorder=.true.
     return
@@ -2465,7 +1877,6 @@ type(particle), pointer :: part1, part2
   sameid=.false.
   if (part1%start_year.ne.part2%start_year) return
   if (part1%start_day.ne.part2%start_day) return
-  if (part1%start_mass.ne.part2%start_mass) return
   if (part1%start_lon.ne.part2%start_lon) return
   if (part1%start_lat.ne.part2%start_lat) return
   sameid=.true. ! passing the above tests means that parts 1 and 2 have the same id
@@ -2481,12 +1892,8 @@ type(particle), pointer :: part1, part2
   if (.not. sameid(part1, part2)) return
   if (part1%lon.ne.part2%lon) return
   if (part1%lat.ne.part2%lat) return
-  if (part1%mass.ne.part2%mass) return
   if (part1%uvel.ne.part2%uvel) return
   if (part1%vvel.ne.part2%vvel) return
-  if (part1%thickness.ne.part2%thickness) return
-  if (part1%width.ne.part2%width) return
-  if (part1%length.ne.part2%length) return
   if (part1%axn.ne.part2%axn) return  !Alon
   if (part1%ayn.ne.part2%ayn) return  !Alon
   if (part1%bxn.ne.part2%bxn) return  !Alon
@@ -2575,9 +1982,9 @@ integer, optional, intent(in) :: il !< i-index of cell part should be in
 integer, optional, intent(in) :: jl !< j-index of cell part should be in
 ! Local variables
 
-  write(iochan,'("diamonds, print_part: ",2a,i5,a,i12,a,2f10.4,i5,f7.2,es12.4,f5.1)') &
-    label, 'pe=(', mpp_pe(), ') #=', part%id, ' start lon,lat,yr,day,mass,hb=', &
-    part%start_lon, part%start_lat, part%start_year, part%start_day, part%start_mass, part%halo_part
+  write(iochan,'("diamonds, print_part: ",2a,i5,a,i12,a,2f10.4,i5,f7.2,f5.1)') &
+    label, 'pe=(', mpp_pe(), ') #=', part%id, ' start lon,lat,yr,day=', &
+    part%start_lon, part%start_lat, part%start_year, part%start_day, part%halo_part
   if (present(il).and.present(jl)) then
     write(iochan,'("diamonds, print_part: ",2a,i5,a,i12,a,2i5)') &
       label, 'pe=(', mpp_pe(), ') #=', part%id, ' List i,j=',il,jl
@@ -2599,11 +2006,6 @@ integer, optional, intent(in) :: jl !< j-index of cell part should be in
     label, 'pe=(', mpp_pe(), ') #=', part%id, &
     ' axn,ayn=', part%axn, part%ayn, &
     ' bxn,byn=', part%bxn, part%byn
-  write(iochan,'("diamonds, print_part: ",2a,i5,a,i12,3(a,2f14.8))') &
-    label, 'pe=(', mpp_pe(), ') #=', part%id, &
-    ' uo,vo=', part%uo, part%vo, &
-    ' ua,va=', part%ua, part%va, &
-    ' ui,vi=', part%ui, part%vi
 end subroutine print_part
 
 
@@ -2697,24 +2099,6 @@ integer :: grdi, grdj
       if (.not. parts%save_short_traj) then !Not totally sure that this is correct
         posn%uvel=this%uvel
         posn%vvel=this%vvel
-        !posn%mass=this%mass
-        !posn%mass_of_bits=this%mass_of_bits
-        !posn%heat_density=this%heat_density
-        !posn%thickness=this%thickness
-        !posn%width=this%width
-        !posn%length=this%length
-        posn%uo=this%uo
-        posn%vo=this%vo
-        !posn%ui=this%ui
-        !posn%vi=this%vi
-        !posn%ua=this%ua
-        !posn%va=this%va
-        !posn%ssh_x=this%ssh_x
-        !posn%ssh_y=this%ssh_y
-        !posn%sst=this%sst
-        !posn%sss=this%sss
-        !posn%cn=this%cn
-        !posn%hi=this%hi
         posn%axn=this%axn
         posn%ayn=this%ayn
         posn%bxn=this%bxn
@@ -2724,7 +2108,6 @@ integer :: grdi, grdj
         posn%lon_old=this%lon_old
         posn%lat_old=this%lat_old
         !posn%halo_part=this%halo_part
-        !posn%static_part=this%static_part
       endif
 
       call push_posn(this%trajectory, posn)
@@ -3538,64 +2921,6 @@ integer :: stderrunit
 
 end subroutine check_position
 
-! ##############################################################################
-!> Add up the mass of parts and/or party bits
-real function sum_mass(parts, justbits, justparts)
-! Arguments
-type(particles), pointer :: parts !< Container for all types and memory
-logical, intent(in), optional :: justbits !< If present, add up mass of just party bits
-logical, intent(in), optional :: justparts !< If present, add up mass of just parts
-! Local variables
-type(particle), pointer :: this
-integer :: grdi, grdj
-
-  sum_mass=0.
-  do grdj = parts%grd%jsc,parts%grd%jec ; do grdi = parts%grd%isc,parts%grd%iec
-    this=>parts%list(grdi,grdj)%first
-    do while(associated(this))
-      if (present(justparts)) then
-        sum_mass=sum_mass+this%mass*this%mass_scaling
-      elseif (present(justbits)) then
-        sum_mass=sum_mass+this%mass_of_bits*this%mass_scaling
-      else
-        sum_mass=sum_mass+(this%mass+this%mass_of_bits)*this%mass_scaling
-      endif
-      this=>this%next
-    enddo
-  enddo ; enddo
-
-end function sum_mass
-
-! ##############################################################################
-!> Add up the heat content of parts and/or party bits
-real function sum_heat(parts,justbits,justparts)
-! Arguments
-type(particles), pointer :: parts !< Container for all types and memory
-logical, intent(in), optional :: justbits !< If present, add up heat content of just party bits
-logical, intent(in), optional :: justparts !< If present, add up heat content of just parts
-! Local variables
-type(particle), pointer :: this
-real :: dm
-integer :: grdi, grdj
-
-  sum_heat=0.
-  do grdj = parts%grd%jsc,parts%grd%jec ; do grdi = parts%grd%isc,parts%grd%iec
-    this=>parts%list(grdi,grdj)%first
-    do while(associated(this))
-      dm=0.
-      if (present(justparts)) then
-        dm=this%mass*this%mass_scaling
-      elseif (present(justbits)) then
-        dm=this%mass_of_bits*this%mass_scaling
-      else
-        dm=(this%mass+this%mass_of_bits)*this%mass_scaling
-      endif
-      sum_heat=sum_heat+dm*this%heat_density
-      this=>this%next
-    enddo
-  enddo ; enddo
-
-end function sum_heat
 
 
 subroutine sanitize_field(arr,val)
@@ -3627,10 +2952,6 @@ character(len=*) :: label
 ! Local variables
 
   if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: checksumming gridded data @ ',trim(label)
-
-  ! external forcing
-  call grd_chksum2(grd, grd%uo, 'uo')
-  call grd_chksum2(grd, grd%vo, 'vo')
 
   ! static
   call grd_chksum2(grd, grd%lon, 'lon')
@@ -3816,10 +3137,6 @@ integer :: grdi, grdj
       fld(i,2) = this%lat
       fld(i,3) = this%uvel
       fld(i,4) = this%vvel
-      fld(i,5) = this%mass
-      fld(i,6) = this%thickness
-      fld(i,7) = this%width
-      fld(i,8) = this%length
       fld(i,9) = this%axn !added by Alon
       fld(i,10) = this%ayn !added by Alon
       fld(i,11) = this%bxn !added by Alon
@@ -3902,7 +3219,7 @@ integer function part_chksum(part )
 ! Arguments
 type(particle), pointer :: part
 ! Local variables
-real :: rtmp(36) !Changed from 28 to 34 by Alon
+real :: rtmp(17) !Changed from 28 to 34 by Alon
 integer :: itmp(36+4), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
 integer :: i
 
@@ -3911,46 +3228,28 @@ integer :: i
   rtmp(2)=part%lat
   rtmp(3)=part%uvel
   rtmp(4)=part%vvel
-  rtmp(5)=part%mass
-  rtmp(6)=part%thickness
-  rtmp(7)=part%width
-  rtmp(8)=part%length
-  rtmp(9)=part%start_lon
-  rtmp(10)=part%start_lat
-  rtmp(11)=part%start_day
-  rtmp(12)=part%start_mass
-  rtmp(13)=part%mass_scaling
-  rtmp(14)=part%mass_of_bits
-  rtmp(15)=part%heat_density
-  rtmp(16)=part%xi
-  rtmp(17)=part%yj
-  rtmp(19)=part%uo
-  rtmp(20)=part%vo
-  rtmp(21)=part%ui
-  rtmp(22)=part%vi
-  rtmp(23)=part%ua
-  rtmp(24)=part%va
-  rtmp(25)=part%ssh_x
-  rtmp(26)=part%ssh_y
-  rtmp(27)=part%cn
-  rtmp(28)=part%hi
-  rtmp(29)=part%axn !Added by Alon
-  rtmp(30)=part%ayn !Added by Alon
-  rtmp(31)=part%bxn !Added by Alon
-  rtmp(32)=part%byn !Added by Alon
-  rtmp(33)=part%uvel_old !Added by Alon
-  rtmp(34)=part%vvel_old !Added by Alon
-  rtmp(35)=part%lat_old !Added by Alon
-  rtmp(36)=part%lon_old !Added by Alon
+  rtmp(5)=part%start_lon
+  rtmp(6)=part%start_lat
+  rtmp(7)=part%start_day
+  rtmp(8)=part%xi
+  rtmp(9)=part%yj
+  rtmp(10)=part%axn !Added by Alon
+  rtmp(11)=part%ayn !Added by Alon
+  rtmp(12)=part%bxn !Added by Alon
+  rtmp(13)=part%byn !Added by Alon
+  rtmp(14)=part%uvel_old !Added by Alon
+  rtmp(15)=part%vvel_old !Added by Alon
+  rtmp(16)=part%lat_old !Added by Alon
+  rtmp(17)=part%lon_old !Added by Alon
 
-  itmp(1:36)=transfer(rtmp,i8) !Changed from 28 to 36 by Alon
-  itmp(37)=part%start_year !Changed from 29 to 37 by Alon
-  itmp(38)=part%ine !Changed from 30 to 38 by Alon
-  itmp(39)=part%jne !Changed from 31 to 39 by Alon
-  itmp(40)=part%particle_num !added  by Alon
+  itmp(1:17)=transfer(rtmp,i8) !Changed from 28 to 36 by Alon
+  itmp(18)=part%start_year !Changed from 29 to 37 by Alon
+  itmp(19)=part%ine !Changed from 30 to 38 by Alon
+  itmp(20)=part%jne !Changed from 31 to 39 by Alon
+  itmp(21)=part%particle_num !added  by Alon
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,37+3 !Changd from 28 to 37 by Alon
+  do i=1,21 !Changd from 28 to 37 by Alon
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i
