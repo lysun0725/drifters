@@ -312,8 +312,8 @@ real, allocatable,dimension(:) :: lon,	&
   grd=>parts%grd
 
 
-  if (allocated(grd%uo)) deallocate(grd%uo)
-  if (allocated(grd%vo)) deallocate(grd%vo)
+  if (associated(grd%uo)) deallocate(grd%uo)
+  if (associated(grd%vo)) deallocate(grd%vo)
 
   allocate(grd%uo(grd%isd:grd%ied,grd%jsd:grd%jed))
   allocate(grd%vo(grd%isd:grd%ied,grd%jsd:grd%jed))
