@@ -312,8 +312,27 @@ real, allocatable,dimension(:) :: lon,	&
   grd=>parts%grd
 
 
-  grd%uo=> MOM_CS%u(:,:,1)
-  grd%vo=> MOM_CS%v(:,:,1)
+  if (allocated(grd%uo)) deallocate(grd%uo)
+  if (allocated(grd%vo)) deallocate(grd%vo)
+
+  allocate(grd%uo(grd%isd:grd%ied,grd%jsd:grd%jed))
+  allocate(grd%vo(grd%isd:grd%ied,grd%jsd:grd%jed))
+
+  do j=grd%jsd,grd%jed
+    do i=grd%isd,grd%ied
+       grd%uo(i,j) = MOM_CS%u(i,j,1)
+    enddo
+  enddo
+
+  do j=grd%jsd,grd%jed
+    do i=grd%isd,grd%ied
+       grd%vo(i,j) = MOM_CS%v(i,j,1)
+    enddo
+  enddo
+
+
+!  grd%uo=> MOM_CS%u(:,:,1)
+!  grd%vo=> MOM_CS%v(:,:,1)
 
   ! Zero out nparts_in_file
   nparts_in_file = 0
@@ -326,7 +345,6 @@ real, allocatable,dimension(:) :: lon,	&
     filename = filename_base
     call get_field_size(filename,'i',siz, field_found=found, domain=grd%domain) 
     nparts_in_file = siz(1)
-    print *,'NPARTS= ',nparts_in_file
     allocate(lon(nparts_in_file))
     allocate(lat(nparts_in_file))
     allocate(depth(nparts_in_file))

@@ -70,8 +70,8 @@ subroutine particles_init(parts, Grid, Time, dt, MOM_CS)
 
  use particles_io, only: read_restart_parts, particles_io_init
 
- type(particles), pointer :: parts
- type(ocean_grid_type), target :: Grid !< Grid type from parent model
+ type(particles), pointer, intent(out) :: parts
+ type(ocean_grid_type), target, intent(in) :: Grid !< Grid type from parent model
  type(time_type), intent(in) :: Time !< Time type from parent model
  real, intent(in)            :: dt !< particle timestep in seconds
  type(MOM_control_struct), pointer, intent(in) :: MOM_CS
@@ -232,8 +232,6 @@ subroutine particles_run(parts, time, uo, vo, stagger)
   integer :: stderrunit
 
 
-  print *,' In particles_run 0001'
-
   ! Get the stderr unit number
   stderrunit = stderr()
 
@@ -246,8 +244,6 @@ subroutine particles_run(parts, time, uo, vo, stagger)
 
   !Initializing _on_ocean_fields
 !  grd%Uvel_on_ocean(:,:,:)=0. ;   grd%Vvel_on_ocean(:,:,:)=0.
-
-  print *,' In particles_run 0002'
 
   ! Manage time
   call get_date(time, iyr, imon, iday, ihr, imin, isec)
@@ -272,11 +268,6 @@ subroutine particles_run(parts, time, uo, vo, stagger)
   if (mpp_pe()==mpp_root_pe().and.lverbose) write(*,'(a,3i5,a,3i5,a,i5,f8.3)') &
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
        ' yr,yrdy=', parts%current_year, parts%current_yearday
-
-  print *,' In particles_run 0003'
-  if (.not. associated(grd)) print *,'grd is not associated'
-  print *,'UO size= ',size(uo,1),size(uo,2), grd%isc,grd%iec,grd%jsc,grd%jec
-
 
  !call sanitize_field(grd%calving,1.e20)
 
@@ -303,7 +294,6 @@ subroutine particles_run(parts, time, uo, vo, stagger)
     call error_mesg('diamonds, particle_run', 'Unrecognized value of stagger!', FATAL)
   endif
 
-  print *,' In particles_run 0004'
   call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
 
   ! Make sure that gridded values agree with mask  (to get ride of NaN values)
@@ -1041,7 +1031,7 @@ type(particle), pointer :: this, next
   deallocate(parts%grd%sin)
   deallocate(parts%grd%ocean_depth)
   deallocate(parts%grd%domain)
-  deallocate(parts%grd)
+!  deallocate(parts%grd)
   call dealloc_buffer(parts%obuffer_n)
   call dealloc_buffer(parts%obuffer_s)
   call dealloc_buffer(parts%obuffer_e)

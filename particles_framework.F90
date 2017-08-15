@@ -165,7 +165,7 @@ end type linked_list
 
 !> Container for all types and memory
 type :: particles !; private
-  type(particles_gridded), pointer :: grd !< Container with all gridded data
+  type(particles_gridded) :: grd !< Container with all gridded data
   type(linked_list), dimension(:,:), allocatable :: list !< Linked list of particles
   type(xyt), pointer :: trajectories=>null() !< A linked list for detached segments of trajectories
   real :: dt !< Time-step between particle calls
@@ -246,7 +246,7 @@ use diag_manager_mod, only: register_diag_field, register_static_field, send_dat
 use diag_manager_mod, only: diag_axis_init
 
 ! Arguments
-type(particles), pointer :: parts
+type(particles), pointer, intent(out) :: parts
 type(ocean_grid_type), target, intent(in) :: Grid
 type(diag_ctrl), intent(in)  :: diag_axes
 real, intent(in) :: dt
@@ -324,8 +324,8 @@ integer :: stdlogunit, stderrunit
 
 
 ! Allocate overall structure
-  allocate(parts)
-  allocate(parts%grd)
+!  allocate(parts)
+!  allocate(parts%grd)
   grd=>parts%grd ! For convenience to avoid parts%grd%X
  !write(stderrunit,*) 'diamonds: allocating domain'
  ! allocate(grd%domain)
@@ -342,9 +342,16 @@ integer :: stdlogunit, stderrunit
   call mpp_clock_begin(parts%clock)
   call mpp_clock_begin(parts%clock_ini)
 
-  call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
-  call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
-  call mpp_get_global_domain( grd%domain, grd%isg, grd%ieg, grd%jsg, grd%jeg )
+!  call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
+!  call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
+!  call mpp_get_global_domain( grd%domain, grd%isg, grd%ieg, grd%jsg, grd%jeg )
+
+  grd%isg = Grid%isg; grd%ieg = Grid%ieg
+  grd%jsg = Grid%jsg; grd%jeg = Grid%jeg
+  grd%isc = Grid%isc; grd%iec = Grid%iec
+  grd%jsc = Grid%jsc; grd%jec = Grid%jec
+  grd%isd = Grid%isd; grd%ied = Grid%ied
+  grd%jsd = Grid%jsd; grd%jed = Grid%jed
 
   call mpp_get_neighbor_pe(grd%domain, NORTH, grd%pe_N)
   call mpp_get_neighbor_pe(grd%domain, SOUTH, grd%pe_S)
@@ -2947,7 +2954,7 @@ end subroutine sanitize_field
 
 subroutine checksum_gridded(grd, label)
 ! Arguments
-type(particles_gridded), pointer :: grd
+type(particles_gridded) :: grd
 character(len=*) :: label
 ! Local variables
 
@@ -2971,7 +2978,7 @@ end subroutine checksum_gridded
 
 subroutine grd_chksum3(grd, fld, txt)
 ! Arguments
-type(particles_gridded), pointer :: grd
+type(particles_gridded) :: grd
 real, dimension(:,:,:), intent(in) :: fld
 character(len=*), intent(in) :: txt
 ! Local variables
@@ -3043,7 +3050,7 @@ end subroutine grd_chksum3
 
 subroutine grd_chksum2(grd, fld, txt)
 ! Arguments
-type(particles_gridded), pointer :: grd
+type(particles_gridded) :: grd
 real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: fld
 character(len=*), intent(in) :: txt
 ! Local variables
@@ -3298,7 +3305,7 @@ end subroutine print_fld
 
 !> Invoke some unit tests
 logical function unit_tests(parts)
-  type(particles), pointer :: parts !< Container for all types and memory
+  type(particles), pointer:: parts !< Container for all types and memory
   ! Local variables
   type(particles_gridded), pointer :: grd
   integer :: stderrunit,i,j,c1,c2

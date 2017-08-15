@@ -1,5 +1,10 @@
 PROGRAM particle_driver
 
+!
+! This is a test driver for MOM6 drifter code
+! Developed by Luyu Sum (lysun@math.umd.edu) and Matt Harrison (matthew.harrison@noaa.gov)
+!
+
   use MOM_file_parser, only : get_param, log_param, param_file_type
   use MOM_get_input, only : Get_MOM_Input, directories
   use MOM_domains, only : MOM_domains_init, MOM_infra_init, clone_MOM_domain, create_group_pass
@@ -23,10 +28,9 @@ PROGRAM particle_driver
   use mpp_mod, only : set_current_pelist => mpp_set_current_pelist
   use particles_mod, only : particles_init
   use particles_mod, only : particles_run, particles_save_restart
-!  use particles_io, only : read_restart_particles
-  use particles_framework, only : particle, particles !, particles_gridded
+  use particles_framework, only : particle, particles
   use particles_framework, only : really_debug
-!  use particles_extra, only : particles_framework_ini, read_restart_particles
+
   implicit none
 
   type(ocean_grid_type), target :: Grid
@@ -35,8 +39,7 @@ PROGRAM particle_driver
   type(MOM_control_struct), allocatable, target, dimension(:) :: CSp !<pointer of ensemble list of MOM control structures
   type(MOM_control_struct), pointer :: CS=> NULL() !<pointer to an element in CSp
   type(hor_index_type)   :: HI ! A hor_index_type for array extents
-  type(particles), pointer  :: drifters => NULL() !< pointer to current ensemble member drifter structure
-  type(particles), allocatable, target, dimension(:)  :: drifters_ens !< drifter ensemble
+  type(particles), pointer, dimension(:)  :: drifters_ens !< drifter ensemble
   type(particles), pointer :: node=>NULL() !<pointer to an element in drifters list
   type(time_type) :: time, time_start, time_start_segment, time_end, time_in
   real :: time_step
@@ -151,7 +154,6 @@ PROGRAM particle_driver
     allocate(CS%u(IsdB:IedB,jsd:jed,nz))   ; CS%u(:,:,:) = 0.0
     allocate(CS%v(isd:ied,JsdB:JedB,nz))   ; CS%v(:,:,:) = 0.0
     allocate(CS%h(isd:ied,jsd:jed,nz))     ; CS%h(:,:,:) = GV%Angstrom
-
     call restart_init(PF,CS%restart_CSp)
     vd = var_desc("h",thickness_units,"Layer Thickness")
     call register_restart_field(CS%h, vd, .true., CS%restart_CSp)
@@ -159,17 +161,7 @@ PROGRAM particle_driver
     call register_restart_field(CS%u, vd, .true., CS%restart_CSp)
     vd = var_desc("v","meter second-1","Meridional velocity",'v','L')
     call register_restart_field(CS%v, vd, .true., CS%restart_CSp)
-
-
     call restore_state(dirs%input_filename, dirs%restart_input_dir, Time, Grid,CS%restart_CSp)
-
-  !   Shift from using the temporary dynamic grid type to using the final
-  ! (potentially static) ocean-specific grid type.
-  !   The next line would be needed if G%Domain had not already been init'd above:
-  !     call clone_MOM_domain(dG%Domain, G%Domain)
-
-
-
     call create_group_pass(CS%pass_uv_T_S_h, CS%u, CS%v, Grid%Domain)
 
   enddo
