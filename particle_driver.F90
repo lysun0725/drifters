@@ -2,7 +2,7 @@ PROGRAM particle_driver
 
 !
 ! This is a test driver for MOM6 drifter code
-! Developed by Luyu Sum (lysun@math.umd.edu) and Matt Harrison (matthew.harrison@noaa.gov)
+! Developed by Luyu Sun (lysun@math.umd.edu) and Matt Harrison (matthew.harrison@noaa.gov)
 !
 
   use MOM_file_parser, only : get_param, log_param, param_file_type
