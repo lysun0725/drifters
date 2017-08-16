@@ -1,4 +1,4 @@
-module particles_mod
+module MOM_particles_mod
 
 use constants_mod, only: radius, pi, omega, HLF
 use MOM_grid, only : ocean_grid_type
@@ -27,23 +27,25 @@ use diag_manager_mod, only: send_data
 
 use MOM, only : MOM_control_struct
 
-use particles_framework, only: particles_framework_init
-use particles_framework, only: particles_gridded, xyt, particle, particles, buffer
-use particles_framework, only: verbose, really_debug,debug,use_roundoff_fix
-use particles_framework, only: find_cell,find_cell_by_search,count_parts,is_point_in_cell,pos_within_cell
-use particles_framework, only: bilin,yearday,count_parts,parts_chksum
-use particles_framework, only: checksum_gridded,add_new_part_to_list
-use particles_framework, only: send_parts_to_other_pes,move_trajectory,move_all_trajectories
-use particles_framework, only: record_posn,check_position,print_part,print_parts,print_fld
-use particles_framework, only: add_new_part_to_list,delete_particle_from_list,destroy_particle
-use particles_framework, only: grd_chksum2,grd_chksum3
-use particles_framework, only: offset_part_dates
-use particles_framework, only: count_parts_in_list,list_chksum
-use particles_framework, only: monitor_a_part,move_part_between_cells, update_halo_particles
-use particles_framework, only: is_point_within_xi_yj_bounds
+use MOM_particles_framework, only: particles_framework_init
+use MOM_particles_framework, only: particles_gridded, xyt, particle, particles, buffer
+use MOM_particles_framework, only: verbose, really_debug,debug,use_roundoff_fix
+use MOM_particles_framework, only: find_cell,find_cell_by_search,count_parts,is_point_in_cell,pos_within_cell
+use MOM_particles_framework, only: bilin,yearday,count_parts,parts_chksum
+use MOM_particles_framework, only: checksum_gridded,add_new_part_to_list
+use MOM_particles_framework, only: send_parts_to_other_pes,move_trajectory,move_all_trajectories
+use MOM_particles_framework, only: record_posn,check_position,print_part,print_parts,print_fld
+use MOM_particles_framework, only: add_new_part_to_list,delete_particle_from_list,destroy_particle
+use MOM_particles_framework, only: grd_chksum2,grd_chksum3
+use MOM_particles_framework, only: offset_part_dates
+use MOM_particles_framework, only: count_parts_in_list,list_chksum
+use MOM_particles_framework, only: monitor_a_part,move_part_between_cells, update_halo_particles
+use MOM_particles_framework, only: is_point_within_xi_yj_bounds
 
-use particles_io,        only: particles_io_init,write_restart,write_trajectory
-!use particles_io,        only: read_restart_parts,read_restart_parts_orig,read_restart_calving
+use MOM_particles_io,        only: particles_io_init,write_restart,write_trajectory
+use MOM_particles_io,        only: read_restart_parts, particles_io_init
+
+
 
 implicit none ; private
 
@@ -68,8 +70,6 @@ contains
 ! ##############################################################################
 subroutine particles_init(parts, Grid, Time, dt, MOM_CS)
 
- use particles_io, only: read_restart_parts, particles_io_init
-
  type(particles), pointer, intent(out) :: parts
  type(ocean_grid_type), target, intent(in) :: Grid !< Grid type from parent model
  type(time_type), intent(in) :: Time !< Time type from parent model
@@ -90,13 +90,6 @@ subroutine particles_init(parts, Grid, Time, dt, MOM_CS)
 
  call particles_framework_init(parts, &
              Grid, Time, dt, MOM_CS%diag)
-
-
-! call particles_framework_init(parts, &
-!             gni, gnj, Grid%Domain%layout, Grid%Domain%io_layout, axes, Grid%Domain%X_FLAGS, Grid%Domain%X_FLAGS, &
-!             dt, Time, Grid%geolonT, Grid%geolatT, Grid%mask2dT, Grid%dxT, Grid%dyT, Grid%areaT, &
-!             Grid%cos_rot, Grid%sin_rot, ocean_depth=Grid%bathyT)
-
 
  call mpp_clock_begin(parts%clock_ior)
  call particles_io_init(parts,Grid%Domain%io_layout)
@@ -384,13 +377,13 @@ subroutine evolve_particles(parts)
         if (debug) call check_position(grd, part, 'evolve_particle (top)')
 
 	! Interpolate gridded velocity fields to part and generate uvel and vvel
-	call interp_flds(grd,part%ine,part%jne,part%xi,part%yj,part%uvel, part%vvel) 
+	call interp_flds(grd,part%ine,part%jne,part%xi,part%yj,part%uvel, part%vvel)
 
           !Time stepping schemes:
           if (Runge_not_Verlet) then
             call Runge_Kutta_stepping(parts,part, axn, ayn, bxn, byn, uveln, vveln,lonn, latn, i, j, xi, yj)
           endif
-          if (.not.Runge_not_Verlet) then 
+          if (.not.Runge_not_Verlet) then
             !call verlet_stepping(parts,part, axn, ayn, bxn, byn, uveln, vveln) ! LUYU: consider RK for now
           endif
 
@@ -1156,4 +1149,4 @@ end function Area_of_triangle
 
 
 
-end module particles_mod
+end module MOM_particles_mod

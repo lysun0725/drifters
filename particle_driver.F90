@@ -26,10 +26,10 @@ PROGRAM particle_driver
   use time_manager_mod, only: time_type, set_time, set_date, JULIAN, NOLEAP, NO_CALENDAR, set_calendar_type, operator(+)
   use ensemble_manager_mod, only : get_ensemble_size, ensemble_manager_init, ensemble_pelist_setup
   use mpp_mod, only : set_current_pelist => mpp_set_current_pelist
-  use particles_mod, only : particles_init
-  use particles_mod, only : particles_run, particles_save_restart
-  use particles_framework, only : particle, particles
-  use particles_framework, only : really_debug
+  use MOM_particles_mod, only : particles_init
+  use MOM_particles_mod, only : particles_run, particles_save_restart
+  use MOM_particles_framework, only : particle, particles
+  use MOM_particles_framework, only : really_debug
 
   implicit none
 
@@ -134,8 +134,6 @@ PROGRAM particle_driver
   do n=1,nPEs_ocn
     CS=>CSp(n)
     call verticalGridInit( PF, CS%GV )
-!    call MOM_timing_init(CS)
-!    call tracer_registry_init(PF,CS%tracer_Reg)
     call MOM_initialize_fixed(dG,CS%OBC,PF,.false.,dirs%output_directory)
     call MOM_initialize_coord(CS%GV, PF, .false., &
        dirs%output_directory, CS%tv, dG%max_depth)
@@ -153,7 +151,7 @@ PROGRAM particle_driver
   do n=1,nPEs_ocn
     CS=>CSp(n)
     CS%GV=>GV
-    ! Allocate and initialize space for primary MOM variables.
+    ! Allocate and initialize space for MOM velocities and thicknesses
     allocate(CS%u(IsdB:IedB,jsd:jed,nz))   ; CS%u(:,:,:) = 0.0
     allocate(CS%v(isd:ied,JsdB:JedB,nz))   ; CS%v(:,:,:) = 0.0
     allocate(CS%h(isd:ied,jsd:jed,nz))     ; CS%h(:,:,:) = GV%Angstrom

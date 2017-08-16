@@ -1,4 +1,4 @@
-module particles_io
+module MOM_particles_io
 
 use constants_mod, only: pi, omega, HLF
 
@@ -27,22 +27,22 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 use MOM_grid, only : ocean_grid_type
 use MOM, only      : MOM_control_struct
 
-use particles_framework, only: particles_gridded, xyt, particle, particles, buffer
-use particles_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
-use particles_framework, only: find_cell,find_cell_by_search,count_parts,is_point_in_cell,pos_within_cell,append_posn
+use MOM_particles_framework, only: particles_gridded, xyt, particle, particles, buffer
+use MOM_particles_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
+use MOM_particles_framework, only: find_cell,find_cell_by_search,count_parts,is_point_in_cell,pos_within_cell,append_posn
 !use particles_framework, only: count_bonds, form_a_bond
-use particles_framework, only: find_individual_particle
-use particles_framework, only: push_posn
-use particles_framework, only: add_new_part_to_list,destroy_particle
-use particles_framework, only: increase_ibuffer,grd_chksum2,grd_chksum3
-use particles_framework, only: bilin
+use MOM_particles_framework, only: find_individual_particle
+use MOM_particles_framework, only: push_posn
+use MOM_particles_framework, only: add_new_part_to_list,destroy_particle
+use MOM_particles_framework, only: increase_ibuffer,grd_chksum2,grd_chksum3
+use MOM_particles_framework, only: bilin
 !params !Niki: write a subroutine to get these
-use particles_framework, only: buffer_width, buffer_width_traj
-use particles_framework, only: verbose, really_debug, debug, restart_input_dir
-use particles_framework, only: ignore_ij_restart, use_slow_find,generate_test_particles!,print_part
-use particles_framework, only: force_all_pes_traj
+use MOM_particles_framework, only: buffer_width, buffer_width_traj
+use MOM_particles_framework, only: verbose, really_debug, debug, restart_input_dir
+use MOM_particles_framework, only: ignore_ij_restart, use_slow_find,generate_test_particles!,print_part
+use MOM_particles_framework, only: force_all_pes_traj
 !use particles_framework, only: check_for_duplicates_in_parallel
-use particles_framework, only: split_id!, id_from_2_ints, generate_id
+use MOM_particles_framework, only: split_id!, id_from_2_ints, generate_id
 
 implicit none ; private
 
@@ -276,7 +276,7 @@ integer :: grdi, grdj
 
   call nullify_domain()
 
- 
+
 end subroutine write_restart
 
 ! ##############################################################################
@@ -303,7 +303,7 @@ integer :: stderrunit, i, j, cnt, ij
 real, allocatable,dimension(:) :: lon,	&
                                   lat,	&
                                   depth, &
-                                  id	
+                                  id
 
   ! Get the stderr unit number
   stderrunit=stderr()
@@ -343,7 +343,7 @@ real, allocatable,dimension(:) :: lon,	&
 
   if (found_restart) then
     filename = filename_base
-    call get_field_size(filename,'i',siz, field_found=found, domain=grd%domain) 
+    call get_field_size(filename,'i',siz, field_found=found, domain=grd%domain)
     nparts_in_file = siz(1)
     allocate(lon(nparts_in_file))
     allocate(lat(nparts_in_file))
@@ -419,7 +419,7 @@ type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
 logical :: io_is_in_append_mode
 
 
-  
+
 end subroutine write_trajectory
 
 
@@ -612,19 +612,19 @@ logical function find_restart_file(filename, actual_file, multiPErestart, tile_i
 
   ! If running as ensemble, add the ensemble id string to the filename
   call get_instance_filename(filename, actual_file)
-    
+
   ! Prefer combined restart files.
   inquire(file=actual_file,exist=find_restart_file)
   if (find_restart_file) return
-    
+
   ! Uncombined restart
   if(tile_id .ge. 0) then
     write(actual_file,'(A,".",I4.4)') trim(actual_file), tile_id
   else
   if (mpp_npes()>10000) then
-     write(pe_name,'(a,i6.6)' )'.', mpp_pe()    
+     write(pe_name,'(a,i6.6)' )'.', mpp_pe()
   else
-     write(pe_name,'(a,i4.4)' )'.', mpp_pe()    
+     write(pe_name,'(a,i4.4)' )'.', mpp_pe()
   endif
   actual_file=trim(actual_file)//trim(pe_name)
   endif
@@ -644,4 +644,4 @@ end function find_restart_file
 
 !######################################################################################
 
-end module
+end module MOM_particles_io

@@ -1,29 +1,44 @@
-module particles_framework
+!> This is the core module for MOM drifter diagnostics
+
+module MOM_particles_framework
+
+! This file is part of MOM6. See LICENSE.md for the license.
 
 use constants_mod, only: radius, pi, omega, HLF
 
 use MOM_grid, only : ocean_grid_type
 use MOM_diag_mediator, only : diag_ctrl
 
-use mpp_domains_mod, only: domain2D
+
 use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
 use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_pe, mpp_root_pe, mpp_chksum
 use mpp_mod, only: COMM_TAG_1, COMM_TAG_2, COMM_TAG_3, COMM_TAG_4
 use mpp_mod, only: COMM_TAG_5, COMM_TAG_6, COMM_TAG_7, COMM_TAG_8
 use mpp_mod, only: COMM_TAG_9, COMM_TAG_10
+use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, input_nml_file
+use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
+
+use mpp_domains_mod, only: domain2D
+use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
+use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
+use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain, mpp_get_global_domain
+use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
+use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
+use mpp_domains_mod, only: mpp_define_io_domain
 
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
 use fms_mod, only: open_namelist_file, check_nml_error, close_file
+use fms_mod, only: clock_flag_default
 
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
+
+use diag_manager_mod, only: register_diag_field, register_static_field, send_data
+use diag_manager_mod, only: diag_axis_init
 
 implicit none ; private
 
 integer :: buffer_width=28 ! size of buffer dimension for comms
 integer :: buffer_width_traj=32  ! LUYU: modify this later. use?
-
-!Local Vars
-! Global data (minimal for debugging)
 logical :: folded_north_on_pe = .false. !< If true, indicates the presence of the tri-polar grid
 logical :: verbose=.false. !< Be verbose to stderr
 logical :: debug=.false. !< Turn on debugging
@@ -46,7 +61,7 @@ logical :: force_all_pes_traj=.false. !< Force all pes write trajectory files re
 public buffer_width,buffer_width_traj
 public verbose, really_debug, debug, restart_input_dir,old_bug_bilin,use_roundoff_fix
 public ignore_ij_restart, use_slow_find,generate_test_particles
-public orig_read, force_all_pes_traj
+public force_all_pes_traj
 
 !Public types
 public particles_gridded, xyt, particle, particles, buffer!, bond
@@ -61,8 +76,7 @@ public add_new_part_to_list, count_out_of_order, check_for_duplicates
 public insert_part_into_list, create_particle, delete_particle_from_list, destroy_particle
 public print_fld,print_part, print_parts,record_posn, push_posn, append_posn, check_position
 public move_trajectory, move_all_trajectories
-!public form_a_bond, connect_all_bonds, show_all_bonds, bond_address_update
-public find_cell, find_cell_by_search, count_parts, is_point_in_cell, pos_within_cell!, count_bonds
+public find_cell, find_cell_by_search, count_parts, is_point_in_cell, pos_within_cell
 public bilin, yearday, parts_chksum, list_chksum, count_parts_in_list
 public checksum_gridded
 public grd_chksum2,grd_chksum3
@@ -73,7 +87,7 @@ public monitor_a_part
 public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
 public check_for_duplicates_in_parallel
-public split_id, id_from_2_ints!, generate_id, cij_from_old_id, convert_old_id
+public split_id, id_from_2_ints
 
 !> Container for gridded fields
 type :: particles_gridded
@@ -125,34 +139,39 @@ type :: particles_gridded
 
 end type particles_gridded
 
-
+!>xyt is a data structure containing particle position and velocity fields.
 type :: xyt
-  real :: lon, lat, day
-  real :: uvel, vvel
-  real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lat_old, lon_old  !Explicit and implicit accelerations !Alon
-  real :: uo, vo
-  integer :: year, particle_num
-  type(xyt), pointer :: next=>null()
+  real :: lon, lat, day      !< Current position (degrees) and day
+  real :: lat_old, lon_old   !< Previous position (degrees)
+  real :: uvel, vvel         !< Current velocity components (m/s)
+  real :: uvel_old, vvel_old !< Previous velocity components (m/s)
+  real :: axn, ayn, bxn, byn   !<Explicit and implicit accelerations (currently disabled)
+  real :: uo, vo               !< Interpolated ocean zonal and meridional velocities (m/s)
+  integer :: year, particle_num  !< Current year and particle number
+  type(xyt), pointer :: next=>null()  !< Pointer to the next position in the list
 end type xyt
 
+!>particle types are data structures describing a tracked particle
 type :: particle
   type(particle), pointer :: prev=>null(), next=>null()
   ! State variables (specific to the particle, needed for restarts)
-  real :: lon, lat, uvel, vvel
-  real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lon_old, lat_old !Explicit and implicit accelerations !Alon
-  real :: start_lon, start_lat, start_day
-  integer :: start_year
-  integer :: particle_num
-  real :: halo_part  ! Equal to zero for parts on computational domain, and =1 for parts on the halo
-  integer(kind=8) :: id !< Particle identifier
-  integer :: ine, jne ! nearest index in NE direction (for convenience)
-  real :: xi, yj ! Non-dimensional coords within current cell (0..1)
-  ! Environment variables (as seen by the particle)
-  real :: uo, vo
+  real :: lon, lat, uvel, vvel !< position (degrees) and zonal and meridional velocities (m/s)
+  real :: lon_old, lat_old, uvel_old, vvel_old  !< previous position (degrees) and zonal
+                                                !< and meridional velocities (m/s)
+  real :: axn, ayn, bxn, byn                    !< explicit and implicit accelerations (currently disabled)
+  real :: start_lon, start_lat, start_day       !< origination position (degrees) and day
+  integer :: start_year                         !< origination year
+  integer :: particle_num                       !< a unique particle number
+  real :: halo_part  !< equal to zero for particles on the computational domain, and 1 for particles on the halo
+  integer(kind=8) :: id                         !< particle identifier (how does this differ from particle_num? mjh)
+  integer :: ine, jne                           !< nearest index in NE direction (for convenience)
+  real :: xi, yj                                !< non-dimensional coords within current cell (0..1)
+  real :: uo, vo                                !< zonal and meridional ocean velocities experienced
+                                                !< by the particle (m/s)
   type(xyt), pointer :: trajectory=>null()
 end type particle
 
-
+!>A buffer structure for message passing
 type :: buffer
   integer :: size=0
   real, dimension(:,:), pointer :: data
@@ -163,13 +182,12 @@ type :: linked_list
   type(particle), pointer :: first=>null() !< Pointer to the beginning of a linked list of parts
 end type linked_list
 
-!> Container for all types and memory
+!> A grand data structure for the particles in the local MOM domain
 type :: particles !; private
   type(particles_gridded) :: grd !< Container with all gridded data
   type(linked_list), dimension(:,:), allocatable :: list !< Linked list of particles
   type(xyt), pointer :: trajectories=>null() !< A linked list for detached segments of trajectories
   real :: dt !< Time-step between particle calls
-             !! \todo Should make dt adaptive?
   integer :: current_year !< Current year (years)
   real :: current_yearday !< Current year-day, 1.00-365.99, (days)
   integer :: traj_sample_hrs !< Period between sampling for trajectories (hours)
@@ -182,13 +200,12 @@ type :: particles !; private
   !>@}
   logical :: restarted=.false. !< Indicate whether we read state from a restart or not
   logical :: Runge_not_Verlet=.True. !< True=Runge-Kutta, False=Verlet.
-  logical :: ignore_missing_restart_parts=.False. !< True Allows the model to ignore particles missing in the restart.
+  logical :: ignore_missing_restart_parts=.False. !< True allows the model to ignore particles missing in the restart.
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
   logical :: save_short_traj=.True. !< True saves only lon,lat,time,id in particle_trajectory.nc
   logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
   logical :: use_new_predictive_corrective =.False. !< Flag to use Bob's predictive corrective particle scheme- Added by Alon
   integer(kind=8) :: debug_particle_with_id = -1 !< If positive, monitors a part with this id
-
   type(buffer), pointer :: obuffer_n=>null() !< Buffer for outgoing parts to the north
   type(buffer), pointer :: ibuffer_n=>null() !< Buffer for incoming parts from the north
   type(buffer), pointer :: obuffer_s=>null() !< Buffer for outgoing parts to the south
@@ -201,10 +218,6 @@ type :: particles !; private
   type(buffer), pointer :: ibuffer_io=>null() !< Buffer for incoming parts during i/o
 end type particles
 
-
-! Needs to be module global so can be public to particles_mod.
-! Remove when backward compatibility no longer needed
-logical :: orig_read=.false.
 
 #ifdef _FILE_VERSION
   character(len=128) :: version = _FILE_VERSION
@@ -229,21 +242,6 @@ contains
 
 subroutine particles_framework_init(parts, Grid, Time, dt, diag_axes)
 
-use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
-use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
-use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain, mpp_get_global_domain
-use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
-use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
-use mpp_domains_mod, only: mpp_define_io_domain
-
-use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, input_nml_file
-use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
-
-use fms_mod, only: open_namelist_file, check_nml_error, close_file
-use fms_mod, only: clock_flag_default
-
-use diag_manager_mod, only: register_diag_field, register_static_field, send_data
-use diag_manager_mod, only: diag_axis_init
 
 ! Arguments
 type(particles), pointer, intent(out) :: parts
@@ -252,17 +250,6 @@ type(diag_ctrl), intent(in)  :: diag_axes
 real, intent(in) :: dt
 type(time_type), intent(in) :: Time
 
-
-!integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
-!integer, intent(in) :: dom_x_flags, dom_y_flags
-
-!type (time_type), intent(in) :: Time ! current time
-!real, dimension(:,:), intent(in) :: ice_lon, ice_lat, ice_wet
-!real, dimension(:,:), intent(in) :: ice_dx, ice_dy, ice_area
-!real, dimension(:,:), intent(in) :: cos_rot, sin_rot
-!real, dimension(:,:), intent(in),optional :: ocean_depth
-!logical, intent(in), optional :: maskmap(:,:)
-!logical, intent(in), optional :: fractional_area
 
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
@@ -288,14 +275,14 @@ namelist /particles_nml/ verbose, halo,  traj_sample_hrs, traj_write_hrs, save_s
          debug, really_debug, ignore_missing_restart_parts, &
          parallel_reprod, use_slow_find, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, &
          generate_test_particles, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, &
-         restart_input_dir, orig_read, old_bug_bilin,do_unit_tests, force_all_pes_traj, &
+         restart_input_dir, old_bug_bilin,do_unit_tests, force_all_pes_traj, &
          grid_is_latlon,Lx, &
          grid_is_regular, &
          ignore_traj, debug_particle_with_id, read_old_restarts
-         
+
 
 ! Local variables
-integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
+integer :: ierr, iunit, i, j, id_class, is, ie, js, je, np
 type(particles_gridded), pointer :: grd
 real :: lon_mod, big_number
 logical :: lerr
@@ -307,8 +294,6 @@ integer :: stdlogunit, stderrunit
   stdlogunit=stdlog()
   write(stdlogunit,*) "particles_framework: "//trim(version)
 
-! Read namelist parameters
- !write(stderrunit,*) 'diamonds: reading namelist'
 #ifdef INTERNAL_FILE_NML
   read (input_nml_file, nml=particles_nml, iostat=ierr)
 #else
@@ -323,12 +308,7 @@ integer :: stdlogunit, stderrunit
   write (stdlogunit, particles_nml)
 
 
-! Allocate overall structure
-!  allocate(parts)
-!  allocate(parts%grd)
-  grd=>parts%grd ! For convenience to avoid parts%grd%X
- !write(stderrunit,*) 'diamonds: allocating domain'
- ! allocate(grd%domain)
+  grd=>parts%grd
   grd%domain => Grid%domain%mpp_domain
 
 ! Clocks
@@ -341,10 +321,6 @@ integer :: stdlogunit, stderrunit
 
   call mpp_clock_begin(parts%clock)
   call mpp_clock_begin(parts%clock_ini)
-
-!  call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
-!  call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
-!  call mpp_get_global_domain( grd%domain, grd%isg, grd%ieg, grd%jsg, grd%jeg )
 
   grd%isg = Grid%isg; grd%ieg = Grid%ieg
   grd%jsg = Grid%jsg; grd%jeg = Grid%jeg
@@ -367,7 +343,6 @@ integer :: stdlogunit, stderrunit
   enddo ; enddo
 
   big_number=1.0E15
- !write(stderrunit,*) 'diamonds: allocating grid'
   allocate( grd%lon(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lon(:,:)=big_number
   allocate( grd%lat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lat(:,:)=big_number
   allocate( grd%lonc(grd%isd:grd%ied, grd%jsd:grd%jed) );grd%lon(:,:)=big_number
@@ -438,19 +413,13 @@ integer :: stdlogunit, stderrunit
       if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i-1,j)-grd%lat(i-2,j)
   enddo; enddo
 
-!  if (.not. present(maskmap)) then ! Using a maskmap causes tickles this sanity check
-!    do j=grd%jsd,grd%jed; do i=grd%isd,grd%ied
-      !if (grd%lon(i,j).ge.big_number) write(stderrunit,*) 'bad lon: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lon(i,j)
-      !if (grd%lat(i,j).ge.big_number) write(stderrunit,*) 'bad lat: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lat(i,j)
-!    enddo; enddo
-!  endif
 
   if ((Lx.gt.1E15 ) .and. (mpp_pe().eq.mpp_root_pe())) then
-          call error_mesg('diamonds, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING)
+          call error_mesg('particles, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING)
   endif
   if ((.not. grid_is_latlon) .and. (Lx.eq.360.)) then
     if (mpp_pe().eq.mpp_root_pe())  then
-            call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING)
+            call error_mesg('particles, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING)
     endif
     Lx=-1.
   endif
@@ -481,7 +450,7 @@ integer :: stdlogunit, stderrunit
   endif
 
 
-
+  ! WE SHOULD JUST COPY geolonC,geolatC instead (MJH)
   ! lonc, latc used for searches
   do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
     grd%lonc(i,j)=0.25*( (grd%lon(i,j)+grd%lon(i-1,j-1)) &
@@ -3565,4 +3534,4 @@ subroutine test_check_for_duplicate_ids_in_list()
   deallocate(ids)
 end subroutine test_check_for_duplicate_ids_in_list
 
-end module
+end module MOM_particles_framework
