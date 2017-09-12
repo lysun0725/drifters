@@ -87,7 +87,7 @@ public monitor_a_part
 public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
 public check_for_duplicates_in_parallel
-public split_id, id_from_2_ints
+public id_from_2_ints
 
 !> Container for gridded fields
 type :: particles_gridded
@@ -202,7 +202,7 @@ type :: particles !; private
   logical :: Runge_not_Verlet=.True. !< True=Runge-Kutta, False=Verlet.
   logical :: ignore_missing_restart_parts=.False. !< True allows the model to ignore particles missing in the restart.
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
-  logical :: save_short_traj=.True. !< True saves only lon,lat,time,id in particle_trajectory.nc
+  logical :: save_short_traj=.false. !< True saves only lon,lat,time,id in particle_trajectory.nc
   logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
   logical :: use_new_predictive_corrective =.False. !< Flag to use Bob's predictive corrective particle scheme- Added by Alon
   integer(kind=8) :: debug_particle_with_id = -1 !< If positive, monitors a part with this id
@@ -262,7 +262,7 @@ logical :: grid_is_latlon=.True. ! True means that the grid is specified in lat 
 logical :: grid_is_regular=.True. ! Flag to say whether point in cell can be found assuming regular Cartesian grid
 logical :: ignore_missing_restart_parts=.False. ! True Allows the model to ignore particles missing in the restart.
 logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
-logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in particle_trajectory.nc
+logical :: save_short_traj=.false. ! True saves only lon,lat,time,id in particle_trajectory.nc
 logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
 logical :: use_new_predictive_corrective =.False. ! Flag to use Bob's predictive corrective particle scheme- Added by Alon
 logical :: do_unit_tests=.false. ! Conduct some unit tests
@@ -2083,7 +2083,7 @@ integer :: grdi, grdj
         posn%vvel_old=this%vvel_old
         posn%lon_old=this%lon_old
         posn%lat_old=this%lat_old
-        !posn%halo_part=this%halo_part
+      !  !posn%halo_part=this%halo_part
       endif
 
       call push_posn(this%trajectory, posn)
@@ -2135,30 +2135,19 @@ type(xyt), pointer :: new_posn,next,last
 end subroutine append_posn
 
 ! ##############################################################################
-
+!> Disconnect a trajectory from a part and add it to a list of trajectory segments
 subroutine move_trajectory(parts, part)
 ! Arguments
-type(particles), pointer :: parts
-type(particle), pointer :: part
+type(particles), pointer :: parts !< Container for all types and memory
+type(particle), pointer :: part !< part containing trajectory
 ! Local variables
 type(xyt), pointer :: next, last
 type(xyt) :: vals
 
+  if (parts%ignore_traj) return
+
   ! If the trajectory is empty, ignore it
   if (.not.associated(part%trajectory)) return
-
-  ! Push identifying info into first posn (note reverse order due to stack)
-  vals%lon=part%start_lon
-  vals%lat=part%start_lat
-  vals%year=part%start_year
-  vals%particle_num=part%particle_num
-  vals%day=part%start_day
-  call push_posn(part%trajectory, vals)
-  vals%lon=0.
-  vals%lat=99.
-  vals%year=0
-  vals%day=0.
-  call push_posn(part%trajectory, vals)
 
   ! Find end of part trajectory and point it to start of existing trajectories
   next=>part%trajectory
@@ -2172,7 +2161,6 @@ type(xyt) :: vals
   part%trajectory=>null()
 
 end subroutine move_trajectory
-
 ! ##############################################################################
 !> Scan all parts in a list and disconnect trajectories and more to the list of trajectory segments
 !! \todo The argument delete_parts should be removed.
@@ -3295,11 +3283,11 @@ logical function unit_tests(parts)
   ! Test 64-bit ID conversion
   i = 1440*1080 ; c1 = 2**30 + 2**4 + 1
   id = id_from_2_ints(c1, i)
-  call split_id(id,c2,j)
-  if (j /= i .or. c2 /= c1) then
-    write(0,*) 'i,c in:',i,c1,' id=',id,' i,c out:',j,c2
-    unit_tests=.true.
-  endif
+  !call split_id(id,c2,j)
+  !if (j /= i .or. c2 /= c1) then
+  !  write(0,*) 'i,c in:',i,c1,' id=',id,' i,c out:',j,c2
+  !  unit_tests=.true.
+  !endif
 
 end function unit_tests
 
@@ -3358,18 +3346,18 @@ end function id_from_2_ints
 ! #################################################################################
 
 !> Split an particle ID into two parts
-subroutine split_id(id, counter, ijhash)
-  integer(kind=8), intent(in)  :: id      !< A unique id assigned when a part is created
-  integer,         intent(out) :: counter !< The counter value assigned at calving
-  integer,         intent(out) :: ijhash  !< A hash of i,j calving location
-  ! Local variables
-  integer(kind=8) :: i8
-
-  counter = ishft(id,-32)
-  !counter = i8
-  ijhash = int(id,4)
-
-end subroutine split_id
+!subroutine split_id(id, counter, ijhash)
+!  integer(kind=8), intent(in)  :: id      !< A unique id assigned when a part is created
+!  integer,         intent(out) :: counter !< The counter value assigned at calving
+!  integer,         intent(out) :: ijhash  !< A hash of i,j calving location
+!  ! Local variables
+!  integer(kind=8) :: i8
+!
+!  counter = ishft(id,-32)
+!  !counter = i8
+!  ijhash = int(id,4)
+!
+!end subroutine split_id
 
 ! #################################################################################
 !> Checks answer to right answer and prints results if different

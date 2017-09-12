@@ -42,7 +42,7 @@ use MOM_particles_framework, only: verbose, really_debug, debug, restart_input_d
 use MOM_particles_framework, only: ignore_ij_restart, use_slow_find,generate_test_particles!,print_part
 use MOM_particles_framework, only: force_all_pes_traj
 !use particles_framework, only: check_for_duplicates_in_parallel
-use MOM_particles_framework, only: split_id!, id_from_2_ints, generate_id
+!use MOM_particles_framework, only: split_id, id_from_2_ints, generate_id
 
 implicit none ; private
 
@@ -373,9 +373,9 @@ real, allocatable,dimension(:) :: lon,	&
     endif
 
     if (really_debug) then
-      write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'diamonds, read_restart_part: part ',k,' is at ',localpart%lon,localpart%lat,&
+      write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'particles, read_restart_part: part ',k,' is at ',localpart%lon,localpart%lat,&
            & ' on PE ',mpp_pe()
-      write(stderrunit,*) 'diamonds, read_restart_parts: lres = ',lres
+      write(stderrunit,*) 'particles, read_restart_parts: lres = ',lres
     endif
 
     if (lres) then ! True if the particle resides on the current processors computational grid
@@ -418,6 +418,193 @@ integer :: from_pe,np
 type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
 logical :: io_is_in_append_mode
 
+  ! Get the stderr unit number
+  stderrunit=stderr()
+  traj4io=>null()
+  obuffer_io=>null()
+  ibuffer_io=>null()
+
+  !Assemble the list of trajectories from all pes in this I/O tile
+  call mpp_clock_begin(clock_trp)
+
+  !First add the trajs on the io_tile_root_pe (if any) to the I/O list
+  if(is_io_tile_root_pe .OR. force_all_pes_traj ) then
+     if(associated(trajectory)) then
+        this=>trajectory
+        do while (associated(this))
+           call append_posn(traj4io, this)
+           this=>this%next
+        enddo
+        trajectory => null()
+     endif
+  endif
+
+  if(.NOT. force_all_pes_traj ) then
+
+  !Now gather and append the parts from all pes in the io_tile to the list on corresponding io_tile_root_pe
+  ntrajs_sent_io =0
+  ntrajs_rcvd_io =0
+
+  if(is_io_tile_root_pe) then
+     !Receive trajs from all pes in this I/O tile !FRAGILE!SCARY!
+     do np=2,size(io_tile_pelist) ! Note: np starts from 2 to exclude self
+        from_pe=io_tile_pelist(np)
+        call mpp_recv(ntrajs_rcvd_io, glen=1, from_pe=from_pe, tag=COMM_TAG_11)
+        if (ntrajs_rcvd_io .gt. 0) then
+           call increase_ibuffer(ibuffer_io, ntrajs_rcvd_io,buffer_width_traj)
+           call mpp_recv(ibuffer_io%data, ntrajs_rcvd_io*buffer_width_traj,from_pe=from_pe, tag=COMM_TAG_12)
+           do i=1, ntrajs_rcvd_io
+              !call unpack_traj_from_buffer2(traj4io, ibuffer_io, i, save_short_traj)
+	      call unpack_traj_from_buffer2(traj4io, ibuffer_io, i)
+           enddo
+       endif
+     enddo
+  else
+     ! Pack and send trajectories to the root PE for this I/O tile
+     do while (associated(trajectory))
+       ntrajs_sent_io = ntrajs_sent_io +1
+       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io)
+       this => trajectory ! Need to keep pointer in order to free up the links memory
+       trajectory => trajectory%next ! This will eventually result in trajectory => null()
+       deallocate(this) ! Delete the link from memory
+     enddo
+
+     call mpp_send(ntrajs_sent_io, plen=1, to_pe=io_tile_root_pe, tag=COMM_TAG_11)
+     if (ntrajs_sent_io .gt. 0) then
+        call mpp_send(obuffer_io%data, ntrajs_sent_io*buffer_width_traj, to_pe=io_tile_root_pe, tag=COMM_TAG_12)
+     endif
+  endif
+
+  endif !.NOT. force_all_pes_traj
+
+  call mpp_clock_end(clock_trp)
+
+  !Now start writing in the io_tile_root_pe if there are any parts in the I/O list
+  call mpp_clock_begin(clock_trw)
+
+  if((force_all_pes_traj .OR. is_io_tile_root_pe) .AND. associated(traj4io)) then
+
+    call get_instance_filename("drifter_trajectories.nc", filename)
+    if(io_tile_id(1) .ge. 0 .AND. .NOT. force_all_pes_traj) then !io_tile_root_pes write
+       if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
+          if (io_tile_id(1)<10000) then
+             write(filename,'(A,".",I4.4)') trim(filename), io_tile_id(1)
+          else
+             write(filename,'(A,".",I6.6)') trim(filename), io_tile_id(1)
+          endif
+       endif
+    else !All pes write, attach pe# to filename
+       if (mpp_npes()<10000) then
+          write(filename,'(A,".",I4.4)') trim(filename), mpp_pe()
+       else
+          write(filename,'(A,".",I6.6)') trim(filename), mpp_pe()
+       endif
+    endif
+
+    io_is_in_append_mode = .false.
+    iret = nf_create(filename, NF_NOCLOBBER, ncid)
+    if (iret .ne. NF_NOERR) then
+      iret = nf_open(filename, NF_WRITE, ncid)
+      io_is_in_append_mode = .true.
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'particles, write_trajectory: nf_open failed'
+    endif
+    if (verbose) then
+      if (io_is_in_append_mode) then
+        write(*,'(2a)') 'particles, write_trajectory: appending to ',filename
+      else
+        write(*,'(2a)') 'particles, write_trajectory: creating ',filename
+      endif
+    endif
+
+    if (io_is_in_append_mode) then
+      iret = nf_inq_dimid(ncid, 'i', i_dim)
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'particles, write_trajectory: nf_inq_dimid i failed'
+      lonid = inq_varid(ncid, 'lon')
+      latid = inq_varid(ncid, 'lat')
+      yearid = inq_varid(ncid, 'year')
+      dayid = inq_varid(ncid, 'day')
+      if (.not.save_short_traj) then
+        uvelid = inq_varid(ncid, 'uvel')
+        vvelid = inq_varid(ncid, 'vvel')
+        uoid = inq_varid(ncid, 'uo')
+        void = inq_varid(ncid, 'vo')
+      endif
+    else
+      ! Dimensions
+      iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'particles, write_trajectory: nf_def_dim i failed'
+
+      ! Variables
+      lonid = def_var(ncid, 'lon', NF_DOUBLE, i_dim)
+      latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
+      yearid = def_var(ncid, 'year', NF_INT, i_dim)
+      dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
+      if (.not. save_short_traj) then
+        uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
+        vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
+        uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
+        void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
+      endif
+
+      ! Attributes
+      iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, 0)
+      iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 1, 1)
+      call put_att(ncid, lonid, 'long_name', 'longitude')
+      call put_att(ncid, lonid, 'units', 'degrees_E')
+      call put_att(ncid, latid, 'long_name', 'latitude')
+      call put_att(ncid, latid, 'units', 'degrees_N')
+      call put_att(ncid, yearid, 'long_name', 'year')
+      call put_att(ncid, yearid, 'units', 'years')
+      call put_att(ncid, dayid, 'long_name', 'year day')
+      call put_att(ncid, dayid, 'units', 'days')
+
+      if (.not. save_short_traj) then
+        call put_att(ncid, uvelid, 'long_name', 'zonal spped')
+        call put_att(ncid, uvelid, 'units', 'm/s')
+        call put_att(ncid, vvelid, 'long_name', 'meridional spped')
+        call put_att(ncid, vvelid, 'units', 'm/s')
+        call put_att(ncid, uoid, 'long_name', 'ocean zonal spped')
+        call put_att(ncid, uoid, 'units', 'm/s')
+        call put_att(ncid, void, 'long_name', 'ocean meridional spped')
+        call put_att(ncid, void, 'units', 'm/s')
+      endif
+    endif
+
+    ! End define mode
+    iret = nf_enddef(ncid)
+
+    ! Write variables
+    this=>traj4io
+    if (io_is_in_append_mode) then
+      iret = nf_inq_dimlen(ncid, i_dim, i)
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'particles, write_trajectory: nf_inq_dimlen i failed'
+    else
+      i = 0
+    endif
+    do while (associated(this))
+      i=i+1
+      call put_double(ncid, lonid, i, this%lon)
+      call put_double(ncid, latid, i, this%lat)
+      call put_int(ncid, yearid, i, this%year)
+      call put_double(ncid, dayid, i, this%day)
+      if (.not. save_short_traj) then
+        call put_double(ncid, uvelid, i, this%uvel)
+        call put_double(ncid, vvelid, i, this%vvel)
+        call put_double(ncid, uoid, i, this%uo)
+        call put_double(ncid, void, i, this%vo)
+      endif
+      next=>this%next
+      deallocate(this)
+      this=>next
+    enddo
+
+    ! Finish up
+    iret = nf_close(ncid)
+    if (iret .ne. NF_NOERR) write(stderrunit,*) 'particles, write_trajectory: nf_close failed',mpp_pe(),filename
+
+  endif !(is_io_tile_root_pe .AND. associated(traj4io))
+  call mpp_clock_end(clock_trw)
+
 
 this=>trajectory
 
@@ -450,8 +637,8 @@ if(present(unsafe)) unsafely=unsafe
   iret=nf_inq_varid(ncid, var, inq_var)
   if (iret .ne. NF_NOERR) then
     if (.not. unsafely) then
-      write(stderrunit,*) 'diamonds, inq_var: nf_inq_varid ',var,' failed'
-      call error_mesg('diamonds, inq_var', 'netcdf function returned a failure!', FATAL)
+      write(stderrunit,*) 'particles, inq_var: nf_inq_varid ',var,' failed'
+      call error_mesg('particles, inq_var', 'netcdf function returned a failure!', FATAL)
     else
       inq_var=-1
     endif
@@ -474,8 +661,8 @@ integer :: stderrunit
 
   iret = nf_def_var(ncid, var, ntype, 1, idim, def_var)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, def_var: nf_def_var failed for ',trim(var)
-    call error_mesg('diamonds, def_var', 'netcdf function returned a failure!', FATAL)
+    write(stderrunit,*) 'particles, def_var: nf_def_var failed for ',trim(var)
+    call error_mesg('particles, def_var', 'netcdf function returned a failure!', FATAL)
   endif
 
 end function def_var
@@ -495,8 +682,8 @@ integer :: stderrunit
 
   iret = nf_inq_varid(ncid, var, inq_varid)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, inq_varid: nf_inq_varid failed for ',trim(var)
-    call error_mesg('diamonds, inq_varid', 'netcdf function returned a failure!', FATAL)
+    write(stderrunit,*) 'particles, inq_varid: nf_inq_varid failed for ',trim(var)
+    call error_mesg('particles, inq_varid', 'netcdf function returned a failure!', FATAL)
   endif
 
 end function inq_varid
@@ -517,9 +704,9 @@ integer :: stderrunit
   vallen=len_trim(attval)
   iret = nf_put_att_text(ncid, id, att, vallen, attval)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, put_att: nf_put_att_text failed adding', &
+    write(stderrunit,*) 'particles, put_att: nf_put_att_text failed adding', &
       trim(att),' = ',trim(attval)
-    call error_mesg('diamonds, put_att', 'netcdf function returned a failure!', FATAL)
+    call error_mesg('particles, put_att', 'netcdf function returned a failure!', FATAL)
   endif
 
 end subroutine put_att
@@ -538,8 +725,8 @@ integer :: stderrunit
 
   iret=nf_get_var1_double(ncid, id, i, get_double)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, get_double: nf_get_var1_double failed reading'
-    call error_mesg('diamonds, get_double', 'netcdf function returned a failure!', FATAL)
+    write(stderrunit,*) 'particles, get_double: nf_get_var1_double failed reading'
+    call error_mesg('particles, get_double', 'netcdf function returned a failure!', FATAL)
   endif
 
 end function get_double
@@ -558,18 +745,20 @@ integer :: stderrunit
 
   iret=nf_get_var1_int(ncid, id, i, get_int)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, get_int: nf_get_var1_int failed reading'
-    call error_mesg('diamonds, get_int', 'netcdf function returned a failure!', FATAL)
+    write(stderrunit,*) 'particles, get_int: nf_get_var1_int failed reading'
+    call error_mesg('particles, get_int', 'netcdf function returned a failure!', FATAL)
   endif
 
 end function get_int
 
 ! ##############################################################################
-
+!> Write a real to a netcdf file
 subroutine put_double(ncid, id, i, val)
 ! Arguments
-integer, intent(in) :: ncid, id, i
-real, intent(in) :: val
+integer, intent(in) :: ncid !< Handle to netcdf file
+integer, intent(in) :: id !< Netcdf id of variable
+integer, intent(in) :: i !< Index of position to write
+real, intent(in) :: val !< Value to write
 ! Local variables
 integer :: iret
 integer :: stderrunit
@@ -579,17 +768,21 @@ integer :: stderrunit
 
   iret = nf_put_vara_double(ncid, id, i, 1, val)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, put_double: nf_put_vara_double failed writing'
-    call error_mesg('diamonds, put_double', 'netcdf function returned a failure!', FATAL)
+    write(stderrunit,*) 'particles, put_double: nf_put_vara_double failed writing'
+    call error_mesg('particless, put_double', 'netcdf function returned a failure!', FATAL)
   endif
 
 end subroutine put_double
 
 ! ##############################################################################
 
+!> Write an integer to a netcdf file
 subroutine put_int(ncid, id, i, val)
 ! Arguments
-integer, intent(in) :: ncid, id, i, val
+integer, intent(in) :: ncid !< Handle to netcdf file
+integer, intent(in) :: id !< Netcdf id of variable
+integer, intent(in) :: i !< Index of position to write
+integer, intent(in) :: val !< Value to write
 ! Local variables
 integer :: iret
 integer :: stderrunit
@@ -599,8 +792,8 @@ integer :: stderrunit
 
   iret = nf_put_vara_int(ncid, id, i, 1, val)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, put_int: nf_put_vara_int failed writing'
-    call error_mesg('diamonds, put_int', 'netcdf function returned a failure!', FATAL)
+    write(stderrunit,*) 'particles, put_int: nf_put_vara_int failed writing'
+    call error_mesg('particles, put_int', 'netcdf function returned a failure!', FATAL)
   endif
 
 end subroutine put_int
