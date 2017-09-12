@@ -65,7 +65,6 @@ PROGRAM particle_driver
   integer :: ierr, io_status, n, nz, unit, num_tsteps, m
 
   ! Modify these later
-  real :: dt=0.1
   integer :: axes(2) !< Diagnostic axes
 
   namelist /particle_driver_nml/ date_init, calendar, months, days, hours, minutes, seconds, dt_seconds, num_tsteps
@@ -90,6 +89,7 @@ PROGRAM particle_driver
   call close_file(unit)
 
   ierr = check_nml_error(io_status,'particle_driver_nml')
+
 
   call Get_MOM_Input(PF,dirs)
 
@@ -172,7 +172,7 @@ PROGRAM particle_driver
   do n=1,nPEs_ocn
     CS=>CSp(n)
     node=>drifters_ens(n)
-    call particles_init( node, Grid, Time, dt, CS)
+    call particles_init( node, Grid, Time, real(dt_seconds), CS)
   enddo
 
   do m = 1,num_tsteps

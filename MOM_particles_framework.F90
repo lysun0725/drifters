@@ -460,7 +460,7 @@ integer :: stdlogunit, stderrunit
   enddo; enddo
 
   if (debug) then
-    write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, particles_init: (',mpp_pe(),') [ij][se]c=', &
+    write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'particles, particles_init: (',mpp_pe(),') [ij][se]c=', &
          grd%isc,grd%iec,grd%jsc,grd%jec, &
          ' [lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
   endif
@@ -468,11 +468,11 @@ integer :: stdlogunit, stderrunit
   do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
     if (grd%lat(i,j) .ne. grd%lat(i,j)) then
       write(stderrunit,*) 'Lat not defined properly', mpp_pe(),i,j,grd%lat(i,j)
-      call error_mesg('diamonds,grid defining', 'Latitude contains NaNs', FATAL)
+      call error_mesg('particles,grid defining', 'Latitude contains NaNs', FATAL)
     endif
     if (grd%lon(i,j) .ne. grd%lon(i,j)) then
       write(stderrunit,*) 'Lon not defined properly', mpp_pe(),i,j,grd%lon(i,j)
-      call error_mesg('diamonds, grid defining', 'Longatudes contains NaNs', FATAL)
+      call error_mesg('particles, grid defining', 'Longatudes contains NaNs', FATAL)
     endif
   enddo; enddo
 
@@ -510,10 +510,10 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   endif
 
   if (do_unit_tests) then
-   if (unit_tests(parts)) call error_mesg('diamonds, particles_init', 'Unit tests failed!', FATAL)
+   if (unit_tests(parts)) call error_mesg('particles, particles_init', 'Unit tests failed!', FATAL)
   endif
 
- !write(stderrunit,*) 'diamonds: done'
+ !write(stderrunit,*) 'particles: done'
   call mpp_clock_end(parts%clock_ini)
   call mpp_clock_end(parts%clock)
 
@@ -551,7 +551,7 @@ integer :: grdi, grdj
 
   yr_offset=int(latest_start_year+1.)-iyr
   if (mpp_pe().eq.mpp_root_pe()) write(*,'(a,i8,a)') &
-    'diamonds: parts found with creation dates after model date! Adjusting part dates by ',yr_offset,' years'
+    'particles: parts found with creation dates after model date! Adjusting part dates by ',yr_offset,' years'
   call parts_chksum(parts, 'before adjusting start dates')
   do grdj = parts%grd%jsc,parts%grd%jec ; do grdi = parts%grd%isc,parts%grd%iec
     this=>parts%list(grdi,grdj)%first
@@ -888,19 +888,19 @@ logical :: halo_debugging
     i=nparts_rcvd_from_n+nparts_rcvd_from_s+nparts_rcvd_from_e+nparts_rcvd_from_w &
      -nparts_to_send_n-nparts_to_send_s-nparts_to_send_e-nparts_to_send_w
     if (nparts_end-(nparts_start+i).ne.0) then
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nparts_end=',nparts_end,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nparts_start=',nparts_start,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: delta=',i,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: error=',nparts_end-(nparts_start+i),' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nparts_to_send_n=',nparts_to_send_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nparts_to_send_s=',nparts_to_send_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nparts_to_send_e=',nparts_to_send_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nparts_to_send_w=',nparts_to_send_w,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nparts_rcvd_from_n=',nparts_rcvd_from_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nparts_rcvd_from_s=',nparts_rcvd_from_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nparts_rcvd_from_e=',nparts_rcvd_from_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nparts_rcvd_from_w=',nparts_rcvd_from_w,' on PE',mpp_pe()
-      !call error_mesg('diamonds, update_halos:', 'We lost some parts!', FATAL)
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: nparts_end=',nparts_end,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: nparts_start=',nparts_start,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: delta=',i,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: error=',nparts_end-(nparts_start+i),' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: nparts_to_send_n=',nparts_to_send_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: nparts_to_send_s=',nparts_to_send_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: nparts_to_send_e=',nparts_to_send_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: nparts_to_send_w=',nparts_to_send_w,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: nparts_rcvd_from_n=',nparts_rcvd_from_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: nparts_rcvd_from_s=',nparts_rcvd_from_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: nparts_rcvd_from_e=',nparts_rcvd_from_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, update_halos: nparts_rcvd_from_w=',nparts_rcvd_from_w,' on PE',mpp_pe()
+      !call error_mesg('particles, update_halos:', 'We lost some parts!', FATAL)
     endif
   endif
   if (debug) then
@@ -918,8 +918,8 @@ logical :: halo_debugging
     enddo ; enddo
     call mpp_sum(i)
     if (i>0 .and. mpp_pe()==mpp_root_pe()) then
-      write(stderrunit,'(a,i4)') 'diamonds, update_halos: # of parts outside computational domain = ',i
-      call error_mesg('diamonds, update_halos:', 'there are parts still in halos!', FATAL)
+      write(stderrunit,'(a,i4)') 'particles, update_halos: # of parts outside computational domain = ',i
+      call error_mesg('particles, update_halos:', 'there are parts still in halos!', FATAL)
     endif ! root_pe
   endif ! debug
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!111
@@ -1160,19 +1160,19 @@ integer :: grdi, grdj
     i=nparts_rcvd_from_n+nparts_rcvd_from_s+nparts_rcvd_from_e+nparts_rcvd_from_w &
      -nparts_to_send_n-nparts_to_send_s-nparts_to_send_e-nparts_to_send_w
     if (nparts_end-(nparts_start+i).ne.0) then
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: nparts_end=',nparts_end,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: nparts_start=',nparts_start,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: delta=',i,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: error=',nparts_end-(nparts_start+i),' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: nparts_to_send_n=',nparts_to_send_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: nparts_to_send_s=',nparts_to_send_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: nparts_to_send_e=',nparts_to_send_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: nparts_to_send_w=',nparts_to_send_w,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: nparts_rcvd_from_n=',nparts_rcvd_from_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: nparts_rcvd_from_s=',nparts_rcvd_from_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: nparts_rcvd_from_e=',nparts_rcvd_from_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_parts_to_other_pes: nparts_rcvd_from_w=',nparts_rcvd_from_w,' on PE',mpp_pe()
-      call error_mesg('diamonds, send_parts_to_other_pes:', 'We lost some parts!', FATAL)
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: nparts_end=',nparts_end,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: nparts_start=',nparts_start,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: delta=',i,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: error=',nparts_end-(nparts_start+i),' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: nparts_to_send_n=',nparts_to_send_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: nparts_to_send_s=',nparts_to_send_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: nparts_to_send_e=',nparts_to_send_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: nparts_to_send_w=',nparts_to_send_w,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: nparts_rcvd_from_n=',nparts_rcvd_from_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: nparts_rcvd_from_s=',nparts_rcvd_from_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: nparts_rcvd_from_e=',nparts_rcvd_from_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'particles, send_parts_to_other_pes: nparts_rcvd_from_w=',nparts_rcvd_from_w,' on PE',mpp_pe()
+      call error_mesg('particles, send_parts_to_other_pes:', 'We lost some parts!', FATAL)
     endif
   endif
 
@@ -1191,8 +1191,8 @@ integer :: grdi, grdj
     enddo ; enddo
     call mpp_sum(i)
     if (i>0 .and. mpp_pe()==mpp_root_pe()) then
-      write(stderrunit,'(a,i4)') 'diamonds, send_parts_to_other_pes: # of parts outside computational domain = ',i
-      call error_mesg('diamonds, send_parts_to_other_pes:', 'there are parts still in halos!', FATAL)
+      write(stderrunit,'(a,i4)') 'particles, send_parts_to_other_pes: # of parts outside computational domain = ',i
+      call error_mesg('particles, send_parts_to_other_pes:', 'there are parts still in halos!', FATAL)
     endif ! root_pe
   endif ! debug
 
@@ -1308,7 +1308,7 @@ end subroutine pull_buffer_ivalue
       deallocate(old)
     endif
     old=>new
-   !write(stderr(),*) 'diamonds, increase_buffer',mpp_pe(),' increased to',new_size
+   !write(stderr(),*) 'particles, increase_buffer',mpp_pe(),' increased to',new_size
 
   end subroutine increase_buffer
 
@@ -1384,7 +1384,7 @@ logical :: quick
         lres=pos_within_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne, localpart%xi, localpart%yj)
         call add_new_part_to_list(parts%list(localpart%ine,localpart%jne)%first, localpart,quick,this)
       else
-        write(stderrunit,'("diamonds, unpack_part_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
+        write(stderrunit,'("particles, unpack_part_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
          & mpp_pe(),') Failed to find i,j=',localpart%ine,localpart%jne,' for lon,lat=',localpart%lon,localpart%lat
         write(stderrunit,*) localpart%lon,localpart%lat
         write(stderrunit,*) localpart%uvel,localpart%vvel
@@ -1399,7 +1399,7 @@ logical :: quick
         write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
         write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
         write(stderrunit,*) lres
-        call error_mesg('diamonds, unpack_part_from_buffer', 'can not find a cell to place part in!', FATAL)
+        call error_mesg('particles, unpack_part_from_buffer', 'can not find a cell to place part in!', FATAL)
       endif
     endif
   endif
@@ -1445,7 +1445,7 @@ integer :: new_size, old_size
       deallocate(old)
     endif
     old=>new
-   !write(stderr(),*) 'diamonds, increase_ibuffer',mpp_pe(),' increased to',new_size
+   !write(stderr(),*) 'particles, increase_ibuffer',mpp_pe(),' increased to',new_size
   endif
 
 end subroutine increase_ibuffer
@@ -1480,7 +1480,7 @@ end subroutine increase_ibuffer
         deallocate(old)
       endif
       old=>new
-     !write(stderr(),*) 'diamonds, increase_ibuffer',mpp_pe(),' increased to',new_size
+     !write(stderr(),*) 'particles, increase_ibuffer',mpp_pe(),' increased to',new_size
     endif
 
   end subroutine increase_ibuffer_traj
@@ -1507,7 +1507,7 @@ end subroutine increase_ibuffer
       deallocate(old)
     endif
     old=>new
-   !write(stderr(),*) 'diamonds, increase_buffer',mpp_pe(),' increased to',new_size
+   !write(stderr(),*) 'particles, increase_buffer',mpp_pe(),' increased to',new_size
 
   end subroutine increase_buffer_traj
 
@@ -1649,14 +1649,14 @@ integer :: grdi, grdj
           this%jne>parts%grd%jec) icnt2=icnt2+1
       this=>this%next
       if (i>1.and..not.associated(this%prev)) then
-        call error_mesg('diamonds, count_out_of_order', 'Pointer %prev is unassociated. This should not happen!', FATAL)
+        call error_mesg('particles, count_out_of_order', 'Pointer %prev is unassociated. This should not happen!', FATAL)
       endif
     enddo
   enddo; enddo
   call mpp_sum(icnt2)
 
   if ((debug.or.icnt1.ne.0).and.mpp_pe().eq.mpp_root_pe()) then
-    write(*,'(a,3(x,a,i6),x,a)') 'diamonds, count_out_of_order:', &
+    write(*,'(a,3(x,a,i6),x,a)') 'particles, count_out_of_order:', &
       '# out of order=', icnt1,'# in halo=',icnt2,'# identicals=',icnt3,label
   endif
 
@@ -1703,7 +1703,7 @@ integer :: grdi_inner, grdj_inner
   call mpp_sum(icnt_same)
 
   if ((debug.or.icnt_id>0.or.icnt_same>0).and.mpp_pe().eq.mpp_root_pe()) then
-    write(*,'(a,2(x,a,i9),x,a)') 'diamonds, check_for_duplicates:', &
+    write(*,'(a,2(x,a,i9),x,a)') 'particles, check_for_duplicates:', &
       '# with same id=', icnt_id,'# identical parts=',icnt_same,label
   endif
 
@@ -1904,8 +1904,8 @@ integer :: stderrunit
   stderrunit=stderr()
 
   if (associated(part)) then
-    write(stderrunit,*) 'diamonds, create_particle: part already associated!!!!',mpp_pe()
-    call error_mesg('diamonds, create_particle', 'part already associated. This should not happen!', FATAL)
+    write(stderrunit,*) 'particles, create_particle: part already associated!!!!',mpp_pe()
+    call error_mesg('particles, create_particle', 'part already associated. This should not happen!', FATAL)
   endif
   allocate(part)
   part=partvals
@@ -1958,27 +1958,27 @@ integer, optional, intent(in) :: il !< i-index of cell part should be in
 integer, optional, intent(in) :: jl !< j-index of cell part should be in
 ! Local variables
 
-  write(iochan,'("diamonds, print_part: ",2a,i5,a,i12,a,2f10.4,i5,f7.2,f5.1)') &
+  write(iochan,'("particles, print_part: ",2a,i5,a,i12,a,2f10.4,i5,f7.2,f5.1)') &
     label, 'pe=(', mpp_pe(), ') #=', part%id, ' start lon,lat,yr,day=', &
     part%start_lon, part%start_lat, part%start_year, part%start_day, part%halo_part
   if (present(il).and.present(jl)) then
-    write(iochan,'("diamonds, print_part: ",2a,i5,a,i12,a,2i5)') &
+    write(iochan,'("particles, print_part: ",2a,i5,a,i12,a,2i5)') &
       label, 'pe=(', mpp_pe(), ') #=', part%id, ' List i,j=',il,jl
   endif
-  write(iochan,'("diamonds, print_part: ",2a,i5,a,i12,a,2i5,a,2l2)') &
+  write(iochan,'("particles, print_part: ",2a,i5,a,i12,a,2i5,a,2l2)') &
     label, 'pe=(', mpp_pe(), ') #=', part%id, &
     ' i,j=', part%ine, part%jne, &
     ' p,n=', associated(part%prev), associated(part%next)
-  write(iochan,'("diamonds, print_part: ",2a,i5,a,i12,3(a,2f14.8))') &
+  write(iochan,'("particles, print_part: ",2a,i5,a,i12,3(a,2f14.8))') &
     label, 'pe=(', mpp_pe(), ') #=', part%id, &
     ' xi,yj=', part%xi, part%yj, &
     ' lon,lat=', part%lon, part%lat, &
     ' lon_old,lat_old=', part%lon_old, part%lat_old
-  write(iochan,'("diamonds, print_part: ",2a,i5,a,i12,2(a,2f14.8))') &
+  write(iochan,'("particles, print_part: ",2a,i5,a,i12,2(a,2f14.8))') &
     label, 'pe=(', mpp_pe(), ') #=', part%id, &
     ' u,v=', part%uvel, part%vvel, &
     ' uvel_old,vvel_old=', part%uvel_old, part%vvel_old
-  write(iochan,'("diamonds, print_part: ",2a,i5,a,i12,2(a,2f14.8))') &
+  write(iochan,'("particles, print_part: ",2a,i5,a,i12,2(a,2f14.8))') &
     label, 'pe=(', mpp_pe(), ') #=', part%id, &
     ' axn,ayn=', part%axn, part%ayn, &
     ' bxn,byn=', part%bxn, part%byn
@@ -2007,7 +2007,7 @@ integer :: grdi, grdj
   nparts=count_parts(parts)
   nnparts=nparts
   call mpp_sum(nnparts)
-  if (nparts.gt.0) write(iochan,'("diamonds, ",a," there are",i5," parts out of",i6," on PE ",i4)') label, nparts, nnparts, mpp_pe()
+  if (nparts.gt.0) write(iochan,'("particles, ",a," there are",i5," parts out of",i6," on PE ",i4)') label, nparts, nnparts, mpp_pe()
 
 end subroutine print_parts
 
@@ -2229,7 +2229,7 @@ logical :: explain=.false.
   elseif (d3==dmin) then; i=ie-1; j=je-1
   elseif (d4==dmin) then; i=is+1; j=je-1
   else
-    call error_mesg('diamonds, find_cell_by_search:', 'This should never EVER happen! (1)', FATAL)
+    call error_mesg('particles, find_cell_by_search:', 'This should never EVER happen! (1)', FATAL)
   endif
 
   if (explain) then
@@ -2268,7 +2268,7 @@ logical :: explain=.false.
     elseif (d5==dmin) then; di=0; dj=-1
     elseif (d7==dmin) then; di=1; dj=0
     else
-      call error_mesg('diamonds, find_cell_by_search:', 'This should never EVER happen!', FATAL)
+      call error_mesg('particles, find_cell_by_search:', 'This should never EVER happen!', FATAL)
     endif
 
     i=min(ie, max(is, io+di))
@@ -2308,7 +2308,7 @@ logical :: explain=.false.
   !         call print_fld(grd, grd%tmp, 'Cost')
   !         stop 'Avoid recursing'
   !       endif
-  !       write(0,'(i3,a,2i5,a,2i3,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative io,jo=',io,jo,' di,dj=',di,dj,' targ=',x,y
+  !       write(0,'(i3,a,2i5,a,2i3,a,2f8.3)') mpp_pe(),'particles, find_cell_by_search: false negative io,jo=',io,jo,' di,dj=',di,dj,' targ=',x,y
   !       explain=.true.; goto 911
   !     endif
       endif
@@ -2324,9 +2324,9 @@ logical :: explain=.false.
     write(0,'(i3,a,3f9.5)') mpp_pe(),'cost ',d4,d5,d6
     write(0,'(i3,a,2f9.5)') mpp_pe(),'x,y ',x,y
     write(0,'(i3,a,4i5)') mpp_pe(),'io,jo ',io,jo,di,dj
-    write(0,'(i3,a,2i5,a,2i3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 i,j=',i-is,j-js,' di,dj=',di,dj
-    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 io,jo=',io,jo
-    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 i,j=',i,j,' targ=',x,y
+    write(0,'(i3,a,2i5,a,2i3)') mpp_pe(),'particles, find_cell_by_search: false negative 2 i,j=',i-is,j-js,' di,dj=',di,dj
+    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'particles, find_cell_by_search: false negative 2 io,jo=',io,jo
+    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'particles, find_cell_by_search: false negative 2 i,j=',i,j,' targ=',x,y
     return
   endif
   find_cell_by_search=.false.
@@ -2511,9 +2511,9 @@ integer :: stderrunit
   ! Safety check index bounds
   if (i-1.lt.grd%isd.or.i.gt.grd%ied.or.j-1.lt.grd%jsd.or.j.gt.grd%jed) then
     write(stderrunit,'(a,i3,(a,3i4))') &
-                     'diamonds, is_point_in_cell: pe=(',mpp_pe(),') i,s,e=', &
+                     'particles, is_point_in_cell: pe=(',mpp_pe(),') i,s,e=', &
                      i,grd%isd,grd%ied,' j,s,e=', j,grd%jsd,grd%jed
-    call error_mesg('diamonds, is_point_in_cell', 'test is off the PE!', FATAL)
+    call error_mesg('particles, is_point_in_cell', 'test is off the PE!', FATAL)
   endif
 
   is_point_in_cell=.false.
@@ -2723,7 +2723,7 @@ integer :: stderrunit
   if (max(y1,y2,y3,y4)<89.999) then
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj, explain=explain)
   else
-    if (debug) write(stderrunit,*) 'diamonds, pos_within_cell: working in tangential plane!'
+    if (debug) write(stderrunit,*) 'particles, pos_within_cell: working in tangential plane!'
     xx=(90.-y)*cos(x*pi_180)
     yy=(90.-y)*sin(x*pi_180)
     x1=(90.-y1)*cos(grd%lon(i-1,j-1)*pi_180)
@@ -2751,11 +2751,11 @@ integer :: stderrunit
         fac=2.*max( abs(xi-0.5), abs(yj-0.5) ); fac=max(1., fac)
         xi=0.5+(xi-0.5)/fac
         yj=0.5+(yj-0.5)/fac
-        if (debug) call error_mesg('diamonds, pos_within_cell', 'in cell so scaling internal coordinates!', WARNING)
+        if (debug) call error_mesg('particles, pos_within_cell', 'in cell so scaling internal coordinates!', WARNING)
       endif
     else
       if (abs(xi-0.5)<=0.5.and.abs(yj-0.5)<=0.5) then
-        if (debug) call error_mesg('diamonds, pos_within_cell', 'out of cell but coordinates <=0.5!', WARNING)
+        if (debug) call error_mesg('particles, pos_within_cell', 'out of cell but coordinates <=0.5!', WARNING)
       endif
     endif
   endif
@@ -2765,14 +2765,14 @@ integer :: stderrunit
   endif
 
  !if (.not. is_point_in_cell(grd, x, y, i, j) ) then
- !   write(stderrunit,'(a,i3,a,8f8.2,a)') 'diamonds, pos_within_cell: (',mpp_pe(),') ', &
+ !   write(stderrunit,'(a,i3,a,8f8.2,a)') 'particles, pos_within_cell: (',mpp_pe(),') ', &
  !                   x1, y1, x2, y2, x3, y3, x4, y4, ' NOT IN CELL!'
  !endif
 
   if (xi.ge.0. .and. xi.le.1. .and. yj.ge.0. .and. yj.le.1.) then
     pos_within_cell=is_point_in_cell(grd, x, y, i, j, explain=explain)
     if (.not. pos_within_cell .and. verbose) then
-      if (debug) call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is in cell BUT is_point_in_cell disagrees!', WARNING)
+      if (debug) call error_mesg('particles, pos_within_cell', 'pos_within_cell is in cell BUT is_point_in_cell disagrees!', WARNING)
     endif
    !pos_within_cell=.true. ! commenting this out makes pos_within_cell agree with is_point_in_cell
   endif
@@ -2829,7 +2829,7 @@ integer :: stderrunit
       write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
       write(stderrunit,'(a,i3)') 'calc_xiyj: b<0 in quadratic root solver!!!!',mpp_pe()
       write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs a,b,c,d,dx,dy',mpp_pe(),a,b,c,d,dx,dy
-      call error_mesg('diamonds, calc_xiyj', 'We have complex roots. The grid must be very distorted!', FATAL)
+      call error_mesg('particles, calc_xiyj', 'We have complex roots. The grid must be very distorted!', FATAL)
     endif
   else
     if (b.ne.0.) then
@@ -2856,7 +2856,7 @@ integer :: stderrunit
       write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
       write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
       write(stderrunit,'(a,i3,1p2e12.4)') 'calc_xiyj: coeffs a,b',mpp_pe(),a,b
-      call error_mesg('diamonds, calc_xiyj', 'Can not invert either linear equaton for xi! This should not happen!', FATAL)
+      call error_mesg('particles, calc_xiyj', 'Can not invert either linear equaton for xi! This should not happen!', FATAL)
     endif
   endif
   if (expl) write(stderrunit,'(a,2e12.4)') 'calc_xiyj: xi,yj=',xi,yj
@@ -2885,14 +2885,14 @@ integer :: stderrunit
 
   lret=pos_within_cell(grd, part%lon, part%lat, part%ine, part%jne, xi, yj)
   if (xi.ne.part%xi.or.yj.ne.part%yj) then
-    write(stderrunit,'("diamonds: check_position (",i4,") b%x,x,-=",3(es12.4,x),a)') mpp_pe(),part%xi,xi,part%xi-xi,label
-    write(stderrunit,'("diamonds: check_position (",i4,") b%y,y,-=",3(es12.4,x),a)') mpp_pe(),part%yj,yj,part%yj-yj,label
+    write(stderrunit,'("particles: check_position (",i4,") b%x,x,-=",3(es12.4,x),a)') mpp_pe(),part%xi,xi,part%xi-xi,label
+    write(stderrunit,'("particles: check_position (",i4,") b%y,y,-=",3(es12.4,x),a)') mpp_pe(),part%yj,yj,part%yj-yj,label
     call print_part(stderrunit, part, 'check_position', il, jl)
-    call error_mesg('diamonds, check_position, '//trim(label),'part has inconsistent xi,yj!',FATAL)
+    call error_mesg('particles, check_position, '//trim(label),'part has inconsistent xi,yj!',FATAL)
   endif
   if (grd%msk(part%ine, part%jne)==0.) then
     call print_part(stderrunit, part, 'check_position, '//trim(label), il, jl)
-    call error_mesg('diamonds, check_position, '//trim(label),'part is in a land cell!',FATAL)
+    call error_mesg('particles, check_position, '//trim(label),'part is in a land cell!',FATAL)
   endif
 
 end subroutine check_position
@@ -2927,7 +2927,7 @@ type(particles_gridded) :: grd
 character(len=*) :: label
 ! Local variables
 
-  if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: checksumming gridded data @ ',trim(label)
+  if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'particles: checksumming gridded data @ ',trim(label)
 
   ! static
   call grd_chksum2(grd, grd%lon, 'lon')
@@ -3001,7 +3001,7 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
   j=mpp_chksum( tmp(lbound(fld,1)+halo:ubound(fld,1)-halo, &
                     lbound(fld,2)+halo:ubound(fld,2)-halo,:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum3: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
+    write(*,'("particles, grd_chksum3: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
 #ifdef CHECKSUM_HALOS
   i=mpp_chksum( fld(lbound(fld,1):ubound(fld,1), &
@@ -3009,7 +3009,7 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
   j=mpp_chksum( tmp(lbound(fld,1):ubound(fld,1), &
                     lbound(fld,2):ubound(fld,2),:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum3* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
+    write(*,'("particles, grd_chksum3* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
 #endif
 
@@ -3061,13 +3061,13 @@ real :: mean, rms, SD, minv, maxv
   i=mpp_chksum( fld(grd%isc:grd%iec,grd%jsc:grd%jec) )
   j=mpp_chksum( grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum2: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i8)') &
+    write(*,'("particles, grd_chksum2: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i8)') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 #ifdef CHECKSUM_HALOS
   i=mpp_chksum( fld(grd%isd:grd%ied,grd%jsd:grd%jed) )
   j=mpp_chksum( grd%tmp(grd%isd:grd%ied,grd%jsd:grd%jed) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum2* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i)') &
+    write(*,'("particles, grd_chksum2* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i)') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 #endif
 
@@ -3140,9 +3140,9 @@ integer :: grdi, grdj
   nparts=count_parts(parts)
 
   if (nparts.ne.sum(icnt(:,:))) then
-    write(*,'("diamonds, parts_chksum: ",2(a,i8))') &
+    write(*,'("particles, parts_chksum: ",2(a,i8))') &
       '# parts =', nparts, ' sum(icnt) =',sum(icnt(:,:))
-    call error_mesg('diamonds, parts_chksum:', 'mismatch in part count!', FATAL)
+    call error_mesg('particles, parts_chksum:', 'mismatch in part count!', FATAL)
   endif
 
   check_halo=.true.
@@ -3150,14 +3150,14 @@ integer :: grdi, grdj
     if (ignore_halo_violation) check_halo=.false.
   endif
   if (check_halo.and.nparts.ne.sum(icnt(grd%isc:grd%iec, grd%jsc:grd%jec))) then
-    write(*,'("diamonds, parts_chksum: ",2(a,i8))') &
+    write(*,'("particles, parts_chksum: ",2(a,i8))') &
       '# parts =', nparts, ' sum(icnt(comp_dom)) =',sum(icnt(:,:))
-    call error_mesg('diamonds, parts_chksum:', 'mismatch in part count on computational domain!', FATAL)
+    call error_mesg('particles, parts_chksum:', 'mismatch in part count on computational domain!', FATAL)
   endif
 
   call mpp_sum(nparts)
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, parts_chksum: ",a18,6(x,a,"=",i22))') &
+    write(*,'("particles, parts_chksum: ",a18,6(x,a,"=",i22))') &
       txt, 'chksum', ichk1, 'chksum2', ichk2, 'chksum3', ichk3, 'chksum4', ichk4, 'chksum5', ichk5, '#', nparts
 
   grd%tmp(:,:)=real(icnt(:,:))
@@ -3417,10 +3417,10 @@ subroutine check_for_duplicates_in_parallel(parts)
   endif
   if (k /= nparts) then
     write(stderrunit,*) 'counted parts=',k,'count_parts()=',nparts
-    call error_mesg('diamonds, check_for_duplicates:', 'Mismatch between concatenation of lists and count_parts()!', FATAL)
+    call error_mesg('particles, check_for_duplicates:', 'Mismatch between concatenation of lists and count_parts()!', FATAL)
   endif
   k = check_for_duplicate_ids_in_list(nparts, ids, verbose=.true.)
-  if (k /= 0) call error_mesg('diamonds, check_for_duplicates:', 'Duplicate part detected across PEs!', FATAL)
+  if (k /= 0) call error_mesg('particles, check_for_duplicates:', 'Duplicate part detected across PEs!', FATAL)
   if (nparts>0) deallocate(ids)
 end subroutine check_for_duplicates_in_parallel
 
@@ -3515,21 +3515,21 @@ subroutine test_check_for_duplicate_ids_in_list()
   call mpp_sum(error_count)
   if (error_count /= 0) then
     error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
-    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for clean list failed!', FATAL)
+    call error_mesg('particles, test_check_for_duplicate_ids_in_list:', 'Unit test for clean list failed!', FATAL)
   endif
   if (mpp_pe() == mpp_root_pe()) ids(5) = ids(4)
   error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.false.)
   call mpp_sum(error_count)
   if (error_count == 0) then
     error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
-    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for dirty list failed!', FATAL)
+    call error_mesg('particles, test_check_for_duplicate_ids_in_list:', 'Unit test for dirty list failed!', FATAL)
   endif
   if (mpp_pe() == mpp_root_pe()) ids(5) = 7 + 5*mpp_pe()
   error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.false.)
   call mpp_sum(error_count)
   if (error_count == 0) then
     error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
-    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for a really dirty list failed!', FATAL)
+    call error_mesg('particles, test_check_for_duplicate_ids_in_list:', 'Unit test for a really dirty list failed!', FATAL)
   endif
   deallocate(ids)
 end subroutine test_check_for_duplicate_ids_in_list

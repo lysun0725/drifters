@@ -419,6 +419,14 @@ type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
 logical :: io_is_in_append_mode
 
 
+this=>trajectory
+
+do while (.true.)
+
+  print *,'traj lon,lat,day= ',this%lon,this%lat,this%day
+  this=>this%next
+  if (.not. associated(this)) exit
+end do
 
 end subroutine write_trajectory
 

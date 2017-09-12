@@ -264,30 +264,11 @@ subroutine particles_run(parts, time, uo, vo, stagger)
 
  !call sanitize_field(grd%calving,1.e20)
 
-  if (vel_stagger == BGRID_NE) then
-    ! Copy ocean and ice velocities. They are already on B-grid u-points.
-    grd%uo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = uo(:,:)
-    grd%vo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = vo(:,:)
-    call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
-  elseif (vel_stagger == CGRID_NE) then
-    ! The u- and v- points will have different offsets with symmetric memory.
-    Iu_off = (size(uo,1) - (grd%iec - grd%isc))/2 - grd%isc + 1
-    ju_off = (size(uo,2) - (grd%jec - grd%jsc))/2 - grd%jsc + 1
-    iv_off = (size(vo,1) - (grd%iec - grd%isc))/2 - grd%isc + 1
-    Jv_off = (size(vo,2) - (grd%jec - grd%jsc))/2 - grd%jsc + 1
-    do I=grd%isc-1,grd%iec ; do J=grd%jsc-1,grd%jec
-      ! Interpolate ocean and ice velocities from C-grid velocity points.
-      Iu = i + Iu_off ; ju = j + ju_off ; iv = i + iv_off ; Jv = j + Jv_off
-      ! This masking is needed for now to prevent particles from running up on to land.
-      mask = min(grd%msk(i,j), grd%msk(i+1,j), grd%msk(i,j+1), grd%msk(i+1,j+1))
-      grd%uo(I,J) = mask * 0.5*(uo(Iu,ju)+uo(Iu,ju+1))
-      grd%vo(I,J) = mask * 0.5*(vo(iv,Jv)+vo(iv+1,Jv))
-    enddo ; enddo
-  else
-    call error_mesg('diamonds, particle_run', 'Unrecognized value of stagger!', FATAL)
-  endif
+ ! Straight copy of ocean velocities
+  grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec) = uo(grd%isc:grd%iec,grd%jsc:grd%jec)
+  grd%vo(grd%isc:grd%iec,grd%jsc:grd%jec) = vo(grd%isc:grd%iec,grd%jsc:grd%jec)
+  call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=CGRID_NE)
 
-  call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
 
   ! Make sure that gridded values agree with mask  (to get ride of NaN values)
   do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
@@ -295,8 +276,8 @@ subroutine particles_run(parts, time, uo, vo, stagger)
     if (grd%msk(i,j).lt. 0.5) then
       grd%uo(i,j) = 0.0 ;  grd%vo(i,j) = 0.0
     endif
-    if (grd%uo(i,j) .ne. grd%uo(i,j)) grd%uo(i,j)=0.
-    if (grd%vo(i,j) .ne. grd%vo(i,j)) grd%vo(i,j)=0.
+!    if (grd%uo(i,j) .ne. grd%uo(i,j)) grd%uo(i,j)=0.
+!    if (grd%vo(i,j) .ne. grd%vo(i,j)) grd%vo(i,j)=0.
   enddo; enddo
 
   if (debug) call parts_chksum(parts, 'run parts (top)')
@@ -501,7 +482,6 @@ subroutine Runge_Kutta_stepping(parts, part, axn, ayn, bxn, byn, uveln, vveln, l
   if (on_tangential_plane) call rotvec_to_tang(lon1,axn1,ayn1,xddot1n,yddot1n) !Alon
 
   !  X2 = X1+dt/2*V1 ; V2 = V1+dt/2*A1; A2=A(X2)
-  !if (debug) write(stderr(),*) 'diamonds, evolve: x2=...'
   if (on_tangential_plane) then
     x2=x1+dt_2*xdot1; y2=y1+dt_2*ydot1
     xdot2=xdot1+dt_2*xddot1; ydot2=ydot1+dt_2*yddot1
@@ -526,7 +506,6 @@ subroutine Runge_Kutta_stepping(parts, part, axn, ayn, bxn, byn, uveln, vveln, l
   if (on_tangential_plane) call rotvec_to_tang(lon2,axn2,ayn2,xddot2n,yddot2n) !Alon
 
   !  X3 = X1+dt/2*V2 ; V3 = V1+dt/2*A2; A3=A(X3)
-  !if (debug) write(stderr(),*) 'diamonds, evolve: x3=...'
   if (on_tangential_plane) then
     x3=x1+dt_2*xdot2; y3=y1+dt_2*ydot2
     xdot3=xdot1+dt_2*xddot2; ydot3=ydot1+dt_2*yddot2
@@ -548,7 +527,6 @@ subroutine Runge_Kutta_stepping(parts, part, axn, ayn, bxn, byn, uveln, vveln, l
   if (on_tangential_plane) call rotvec_to_tang(lon3,axn3,ayn3,xddot3n,yddot3n) !Alon
 
   !  X4 = X1+dt*V3 ; V4 = V1+dt*A3; A4=A(X4)
-  !if (debug) write(stderr(),*) 'diamonds, evolve: x4=...'
   if (on_tangential_plane) then
     x4=x1+dt*xdot3; y4=y1+dt*ydot3
     xdot4=xdot1+dt*xddot3; ydot4=ydot1+dt*yddot3
@@ -616,12 +594,12 @@ subroutine rotpos_to_tang(lon, lat, x, y, id_in)
   endif
 
   if (lat>90.) then
-      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat>90 already!',lat, lon, id
-      call error_mesg('diamonds, rotpos_to_tang','Something went very wrong!',FATAL)
+      write(stderrunit,*) 'drifters, rotpos_to_tang: lat>90 already!',lat, lon, id
+      call error_mesg('drifters, rotpos_to_tang','Something went very wrong!',FATAL)
   endif
   if (lat==90.) then
-    write(stderrunit,*) 'diamonds, rotpos_to_tang: lat==90 already!',lat, lon
-    call error_mesg('diamonds, rotpos_to_tang','Something went wrong!',FATAL)
+    write(stderrunit,*) 'drifters, rotpos_to_tang: lat==90 already!',lat, lon
+    call error_mesg('drifters, rotpos_to_tang','Something went wrong!',FATAL)
   endif
 
   colat=90.-lat
@@ -770,34 +748,34 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
     if (.not. point_in_cell_using_xi_yj) then
 
       if (lret) then
-        write(stderrunit,*) 'diamonds, adjust: WARNING!!! lret=T but |xi,yj|>1',mpp_pe()
-        write(stderrunit,*) 'diamonds, adjust: xi=',xi,' lon=',lon
-        write(stderrunit,*) 'diamonds, adjust: x3 x2=',grd%lon(i-1,j),grd%lon(i,j)
-        write(stderrunit,*) 'diamonds, adjust: x0 x1=',grd%lon(i-1,j-1),grd%lon(i,j-1)
-        write(stderrunit,*) 'diamonds, adjust: yi=',yj,' lat=',lat
-        write(stderrunit,*) 'diamonds, adjust: y3 y2=',grd%lat(i-1,j),grd%lat(i,j)
-        write(stderrunit,*) 'diamonds, adjust: y0 y1=',grd%lat(i-1,j-1),grd%lat(i,j-1)
+        write(stderrunit,*) 'drifters, adjust: WARNING!!! lret=T but |xi,yj|>1',mpp_pe()
+        write(stderrunit,*) 'drifters, adjust: xi=',xi,' lon=',lon
+        write(stderrunit,*) 'drifters, adjust: x3 x2=',grd%lon(i-1,j),grd%lon(i,j)
+        write(stderrunit,*) 'drifters, adjust: x0 x1=',grd%lon(i-1,j-1),grd%lon(i,j-1)
+        write(stderrunit,*) 'drifters, adjust: yi=',yj,' lat=',lat
+        write(stderrunit,*) 'drifters, adjust: y3 y2=',grd%lat(i-1,j),grd%lat(i,j)
+        write(stderrunit,*) 'drifters, adjust: y0 y1=',grd%lat(i-1,j-1),grd%lat(i,j-1)
         lret=is_point_in_cell(grd, lon, lat, i, j,explain=.true.)
-        write(stderrunit,*) 'diamonds, adjust: fn is_point_in_cell=',lret
+        write(stderrunit,*) 'drifters, adjust: fn is_point_in_cell=',lret
         lret=pos_within_cell(grd, lon, lat, i, j, xi, yj,explain=.true.)
-        write(stderrunit,*) 'diamonds, adjust: fn pos_within_cell=',lret
+        write(stderrunit,*) 'drifters, adjust: fn pos_within_cell=',lret
         write(0,*) 'This should never happen!'
         call error_mesg('adjust index, ','particle is_point_in_cell=True but xi, yi are out of cell',FATAL)
         error=.true.; return
      endif
     else
       if (.not.lret) then
-        write(stderrunit,*) 'diamonds, adjust: WARNING!!! lret=F but |xi,yj|<1',mpp_pe()
-        write(stderrunit,*) 'diamonds, adjust: xi=',xi,' lon=',lon
-        write(stderrunit,*) 'diamonds, adjust: x3 x2=',grd%lon(i-1,j),grd%lon(i,j)
-        write(stderrunit,*) 'diamonds, adjust: x0 x1=',grd%lon(i-1,j-1),grd%lon(i,j-1)
-        write(stderrunit,*) 'diamonds, adjust: yi=',yj,' lat=',lat
-        write(stderrunit,*) 'diamonds, adjust: y3 y2=',grd%lat(i-1,j),grd%lat(i,j)
-        write(stderrunit,*) 'diamonds, adjust: y0 y1=',grd%lat(i-1,j-1),grd%lat(i,j-1)
+        write(stderrunit,*) 'drifters, adjust: WARNING!!! lret=F but |xi,yj|<1',mpp_pe()
+        write(stderrunit,*) 'drifters, adjust: xi=',xi,' lon=',lon
+        write(stderrunit,*) 'drifters, adjust: x3 x2=',grd%lon(i-1,j),grd%lon(i,j)
+        write(stderrunit,*) 'drifters, adjust: x0 x1=',grd%lon(i-1,j-1),grd%lon(i,j-1)
+        write(stderrunit,*) 'drifters, adjust: yi=',yj,' lat=',lat
+        write(stderrunit,*) 'drifters, adjust: y3 y2=',grd%lat(i-1,j),grd%lat(i,j)
+        write(stderrunit,*) 'drifters, adjust: y0 y1=',grd%lat(i-1,j-1),grd%lat(i,j-1)
         lret=is_point_in_cell(grd, lon, lat, i, j,  explain=.true.)
-        write(stderrunit,*) 'diamonds, adjust: fn is_point_in_cell=',lret
+        write(stderrunit,*) 'drifters, adjust: fn is_point_in_cell=',lret
         lret=pos_within_cell(grd, lon, lat, i, j, xi, yj, explain=.true.)
-        write(stderrunit,*) 'diamonds, adjust: fn pos_within_cell=',lret
+        write(stderrunit,*) 'drifters, adjust: fn pos_within_cell=',lret
         write(0,*) 'This should never happen!'
         call error_mesg('adjust index, ','particle is_point_in_cell=False but xi, yi are out of cell',FATAL)
         error=.true.; return
@@ -839,11 +817,11 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
     lret=pos_within_cell(grd, lon, lat, inm, jnm, xi, yj) ! Update xi and yj
   enddo
   if (abs(inm-i0)>1) then
-    write(stderrunit,*) 'pe=',mpp_pe(),'diamonds, adjust: inm,i0,inm-i0=',inm,i0,inm-i0
+    write(stderrunit,*) 'pe=',mpp_pe(),'drifters, adjust: inm,i0,inm-i0=',inm,i0,inm-i0
    !stop 'Moved too far in i without mask!'
   endif
   if (abs(jnm-j0)>1) then
-    write(stderrunit,*) 'pe=',mpp_pe(),'diamonds, adjust: jnm,i0,jnm-j0=',jnm,j0,inm-j0
+    write(stderrunit,*) 'pe=',mpp_pe(),'drifters, adjust: jnm,i0,jnm-j0=',jnm,j0,inm-j0
    !stop 'Moved too far in j without mask!'
   endif
 
@@ -857,7 +835,7 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
         if (grd%msk(i-1,j)>0.) then
           if (i>grd%isd+1) i=i-1
         else
-         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing part from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+         !write(stderr(),'(a,6f8.3,i)') 'drifters, adjust: bouncing part from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
           bounced=.true.
         endif
       endif
@@ -867,7 +845,7 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
         if (grd%msk(i+1,j)>0.) then
           if (i<grd%ied) i=i+1
         else
-         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing part from east',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+         !write(stderr(),'(a,6f8.3,i)') 'drifters, adjust: bouncing part from east',lon,lat,xi,yj,uvel,vvel,mpp_pe()
           bounced=.true.
         endif
       endif
@@ -877,7 +855,7 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
         if (grd%msk(i,j-1)>0.) then
           if (j>grd%jsd+1) j=j-1
         else
-         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing part from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+         !write(stderr(),'(a,6f8.3,i)') 'drifters, adjust: bouncing part from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
           bounced=.true.
         endif
       endif
@@ -887,7 +865,7 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
         if (grd%msk(i,j+1)>0.) then
           if (j<grd%jed) j=j+1
         else
-         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing part from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+         !write(stderr(),'(a,6f8.3,i)') 'drifters, adjust: bouncing part from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
           bounced=.true.
         endif
       endif
@@ -903,17 +881,17 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
       lat=bilin(grd, grd%lat, i, j, xi, yj)
     endif
     if (debug) then
-      if (grd%msk(i,j)==0.) stop 'diamonds, adjust: part is in land! This should not happen...'
+      if (grd%msk(i,j)==0.) stop 'drifters, adjust: part is in land! This should not happen...'
     endif
     lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
 
   enddo
  !if (debug) then
  !  if (abs(i-i0)>2) then
- !    stop 'diamonds, adjust: Moved too far in i!'
+ !    stop 'drifters, adjust: Moved too far in i!'
  !  endif
  !  if (abs(j-j0)>2) then
- !    stop 'diamonds, adjust: Moved too far in j!'
+ !    stop 'drifters, adjust: Moved too far in j!'
  !  endif
  !endif
 
@@ -921,16 +899,16 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
 
   if (.not.bounced.and..not.lret) then ! This implies the part traveled many cells without getting far enough
     if (debug) then
-      write(stderrunit,*) 'diamonds, adjust: lon0, lat0=',lon0,lat0
-      write(stderrunit,*) 'diamonds, adjust: xi0, yj0=',xi0,yj0
-      write(stderrunit,*) 'diamonds, adjust: i0,j0=',i0,j0
-      write(stderrunit,*) 'diamonds, adjust: lon, lat=',lon,lat
-      write(stderrunit,*) 'diamonds, adjust: xi,yj=',xi,yj
-      write(stderrunit,*) 'diamonds, adjust: i,j=',i,j
-      write(stderrunit,*) 'diamonds, adjust: inm,jnm=',inm,jnm
-      write(stderrunit,*) 'diamonds, adjust: icount=',icount
+      write(stderrunit,*) 'drifters, adjust: lon0, lat0=',lon0,lat0
+      write(stderrunit,*) 'drifters, adjust: xi0, yj0=',xi0,yj0
+      write(stderrunit,*) 'drifters, adjust: i0,j0=',i0,j0
+      write(stderrunit,*) 'drifters, adjust: lon, lat=',lon,lat
+      write(stderrunit,*) 'drifters, adjust: xi,yj=',xi,yj
+      write(stderrunit,*) 'drifters, adjust: i,j=',i,j
+      write(stderrunit,*) 'drifters, adjust: inm,jnm=',inm,jnm
+      write(stderrunit,*) 'drifters, adjust: icount=',icount
       lret=pos_within_cell(grd, lon, lat, i, j, xi, yj,explain=.true.)
-      write(stderrunit,*) 'diamonds, adjust: lret=',lret
+      write(stderrunit,*) 'drifters, adjust: lret=',lret
     endif
 
     if (abs(i-i0)+abs(j-j0)==0) then
@@ -944,13 +922,13 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
         xi=(xi-0.5)*(1.-posn_eps)+0.5
         yj=(yj-0.5)*(1.-posn_eps)+0.5
       endif
-      call error_mesg('diamonds, adjust', 'part did not move or bounce during iterations AND was not in cell. Adjusting!', WARNING)
-      write(stderrunit,*) 'diamonds, adjust: The adjusting particle is: ', id,  mpp_pe()
-      write(stderrunit,*) 'diamonds, adjust: The adjusting lon,lat,u,v: ', lon, lat, uvel, vvel
-      write(stderrunit,*) 'diamonds, adjust: The adjusting xi,ji: ', xi, yj
+      call error_mesg('drifters, adjust', 'part did not move or bounce during iterations AND was not in cell. Adjusting!', WARNING)
+      write(stderrunit,*) 'drifters, adjust: The adjusting particle is: ', id,  mpp_pe()
+      write(stderrunit,*) 'drifters, adjust: The adjusting lon,lat,u,v: ', lon, lat, uvel, vvel
+      write(stderrunit,*) 'drifters, adjust: The adjusting xi,ji: ', xi, yj
       lret=pos_within_cell(grd, lon, lat, inm, jnm, xi, yj,explain=.true.)
     else
-      call error_mesg('diamonds, adjust', 'part iterated many times without bouncing!', WARNING)
+      call error_mesg('drifters, adjust', 'part iterated many times without bouncing!', WARNING)
     endif
   endif
 !  if (xi>1.) xi=1.-posn_eps    !Alon
@@ -969,7 +947,7 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
     write(0,*) 'grd%msk(i0, j0)=', grd%msk(i0,j0)
     write(0,*) 'lon0, lat0,=', lon0,lat0
     write(0,*) 'i,j,lon, lat,grd%msk(i,j)=', i,j,lon,lat,grd%msk(i,j)
-    write(stderrunit,*) 'diamonds, adjust: Should not get here! part is not in cell after adjustment', id, mpp_pe()
+    write(stderrunit,*) 'drifters, adjust: Should not get here! part is not in cell after adjustment', id, mpp_pe()
     if (debug) error=.true.
   endif
  end subroutine adjust_index_and_ground
@@ -1038,7 +1016,7 @@ type(particle), pointer :: this, next
   call mpp_clock_end(parts%clock_ini)
   deallocate(parts)
 
-  if (mpp_pe()==mpp_root_pe()) write(*,'(a,i8)') 'diamonds: particles_end complete',mpp_pe()
+  if (mpp_pe()==mpp_root_pe()) write(*,'(a,i8)') 'drifters: particles_end complete',mpp_pe()
 
   contains
 
