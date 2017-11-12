@@ -131,21 +131,21 @@ real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
                                    uvel,         &
                                    vvel,         &
-                                   axn,          &
-                                   ayn,          &
-                                   bxn,          &
-                                   byn,          &
+!                                   axn,          &
+!                                   ayn,          &
+!                                   bxn,          &
+!                                   byn,          &
                                    start_lon,    &
-                                   start_lat,    &
-                                   start_day
+                                   start_lat!,    &
+!                                   start_day
 
 
 
 integer, allocatable, dimension(:) :: ine,              &
                                       jne,              &
                                       id_cnt,           &
-                                      id_ij,            &
-                                      start_year,       &
+!                                      id_ij,            &
+!                                      start_year,       &
                                       first_id_cnt,     &
                                       other_id_cnt,     &
                                       first_id_ij,      &
@@ -179,20 +179,20 @@ integer :: grdi, grdj
    allocate(lat(nparts))
    allocate(uvel(nparts))
    allocate(vvel(nparts))
-   allocate(axn(nparts))    !Alon
-   allocate(ayn(nparts))    !Alon
-   allocate(bxn(nparts)) !Alon
-   allocate(byn(nparts)) !Alon
+ !  allocate(axn(nparts))    !Alon
+ !  allocate(ayn(nparts))    !Alon
+ !  allocate(bxn(nparts)) !Alon
+ !  allocate(byn(nparts)) !Alon
    allocate(start_lon(nparts))
    allocate(start_lat(nparts))
-   allocate(start_day(nparts))
+!   allocate(start_day(nparts))
 
 
    allocate(ine(nparts))
    allocate(jne(nparts))
-   allocate(start_year(nparts))
+!   allocate(start_year(nparts))
    allocate(id_cnt(nparts))
-   allocate(id_ij(nparts))
+!   allocate(id_ij(nparts))
 
 
   call get_instance_filename("drifters.res.nc", filename)
@@ -209,28 +209,29 @@ integer :: grdi, grdj
   id = register_restart_field(parts_restart,filename,'lat',lat,longname='latitude',units='degrees_N')
   id = register_restart_field(parts_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
   id = register_restart_field(parts_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
-  if (.not. parts%Runge_not_Verlet) then
-    id = register_restart_field(parts_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2')
-    id = register_restart_field(parts_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2')
-    id = register_restart_field(parts_restart,filename,'bxn',bxn,longname='inplicit zonal acceleration',units='m/s^2')
-    id = register_restart_field(parts_restart,filename,'byn',byn,longname='implicit meridional acceleration',units='m/s^2')
-  endif
+!  if (.not. parts%Runge_not_Verlet) then
+!    id = register_restart_field(parts_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2')
+!    id = register_restart_field(parts_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2')
+!    id = register_restart_field(parts_restart,filename,'bxn',bxn,longname='inplicit zonal acceleration',units='m/s^2')
+!    id = register_restart_field(parts_restart,filename,'byn',byn,longname='implicit meridional acceleration',units='m/s^2')
+!  endif
   id = register_restart_field(parts_restart,filename,'ine',ine,longname='i index',units='none')
   id = register_restart_field(parts_restart,filename,'jne',jne,longname='j index',units='none')
   id = register_restart_field(parts_restart,filename,'start_lon',start_lon, &
-                                            longname='longitude of calving location',units='degrees_E')
+                                            longname='longitude of starting location',units='degrees_E')
   id = register_restart_field(parts_restart,filename,'start_lat',start_lat, &
-                                            longname='latitude of calving location',units='degrees_N')
-  id = register_restart_field(parts_restart,filename,'start_year',start_year, &
-                                            longname='calendar year of calving event', units='years')
+                                            longname='latitude of starting location',units='degrees_N')
+!  id = register_restart_field(parts_restart,filename,'start_year',start_year, &
+!                                            longname='calendar year of calving event', units='years')
   id = register_restart_field(parts_restart,filename,'id_cnt',id_cnt, &
                                             longname='counter component of particle id', units='dimensionless')
-  id = register_restart_field(parts_restart,filename,'id_ij',id_ij, &
-                                            longname='position component of particle id', units='dimensionless')
-  id = register_restart_field(parts_restart,filename,'start_day',start_day, &
-                                            longname='year day of calving event',units='days')
+!  id = register_restart_field(parts_restart,filename,'id_ij',id_ij, &
+!                                            longname='position component of particle id', units='dimensionless')
+!  id = register_restart_field(parts_restart,filename,'start_day',start_day, &
+!                                            longname='year day of calving event',units='days')
 
 
+  print *,'in write_restart: done registering restart fields'
   ! Write variables
 
   i = 0
@@ -241,11 +242,14 @@ integer :: grdi, grdj
       lon(i) = this%lon; lat(i) = this%lat
       uvel(i) = this%uvel; vvel(i) = this%vvel
       ine(i) = this%ine; jne(i) = this%jne
-      axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
-      bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
+!      axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
+!      bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
-      start_year(i) = this%start_year; start_day(i) = this%start_day
+!      start_year(i) = this%start_year; start_day(i) = this%start_day
+      id_cnt(i) = this%id !; id_ij(i) = this%id_ij
       this=>this%next
+      print *, lon(i),lat(i),uvel(i),vvel(i),ine(i),&
+           jne(i),start_lon(i),start_lat(i),id_cnt(i)
     enddo
   enddo ; enddo
 
@@ -258,21 +262,21 @@ integer :: grdi, grdj
              lat,          &
              uvel,         &
              vvel,         &
-             axn,          &
-             ayn,          &
-             bxn,          &
-             byn,          &
+!             axn,          &
+!             ayn,          &
+!             bxn,          &
+!             byn,          &
              start_lon,    &
-             start_lat,    &
-             start_day  )
+             start_lat)    !,    &
+!             start_day  )
 
 
   deallocate(           &
              ine,       &
              jne,       &
-             id_cnt,    &
-             id_ij,     &
-             start_year )
+             id_cnt) !,    &
+!             id_ij,     &
+!             start_year )
 
   call nullify_domain()
 
@@ -295,7 +299,7 @@ logical :: multiPErestart  ! Not needed with new restart read; currently kept fo
 real :: lon0, lon1, lat0, lat1
 real :: pos_is_good, pos_is_good_all_pe
 character(len=33) :: filename, filename_base
-type(particles_gridded), pointer :: grd
+type(particles_gridded), pointer :: grd=>NULL()
 
 type(particle) :: localpart
 integer :: stderrunit, i, j, cnt, ij
@@ -311,12 +315,18 @@ real, allocatable,dimension(:) :: lon,	&
   ! For convenience
   grd=>parts%grd
 
+  if (.not. associated(grd)) print *,'parts%grd not associated!'
+
+  print *,'in read_restart_parts'
+  print *,grd%isd,grd%ied,grd%jsd,grd%jed
 
   if (associated(grd%uo)) deallocate(grd%uo)
   if (associated(grd%vo)) deallocate(grd%vo)
 
   allocate(grd%uo(grd%isd:grd%ied,grd%jsd:grd%jed))
   allocate(grd%vo(grd%isd:grd%ied,grd%jsd:grd%jed))
+
+  print *,'in read_restart_parts (2)'
 
   do j=grd%jsd,grd%jed
     do i=grd%isd,grd%ied
@@ -330,7 +340,7 @@ real, allocatable,dimension(:) :: lon,	&
     enddo
   enddo
 
-
+  print *,'in read_restart_parts (3)'
 !  grd%uo=> MOM_CS%u(:,:,1)
 !  grd%vo=> MOM_CS%v(:,:,1)
 
@@ -342,17 +352,25 @@ real, allocatable,dimension(:) :: lon,	&
   found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
 
   if (found_restart) then
+    print *,'Found restart'
+
     filename = filename_base
     call get_field_size(filename,'i',siz, field_found=found, domain=grd%domain)
+
+    print *,'restart size= ',siz
     nparts_in_file = siz(1)
     allocate(lon(nparts_in_file))
     allocate(lat(nparts_in_file))
     allocate(depth(nparts_in_file))
     allocate(id(nparts_in_file))
 
+    print *,'reading lon'
     call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
+    print *,'reading lat'
     call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
+    print *,'reading depth'
     call read_unlimited_axis(filename,'depth',depth,domain=grd%domain)
+    print *,'reading drifter num'
     call read_unlimited_axis(filename,'drifter_num',id,domain=grd%domain)
   end if ! found_restart ln 569
 
@@ -366,6 +384,8 @@ real, allocatable,dimension(:) :: lon,	&
     localpart%lon=lon(k)
     localpart%lat=lat(k)
 
+    print *,'calling find_cell'
+
     if (use_slow_find) then
       lres=find_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
     else
@@ -378,6 +398,7 @@ real, allocatable,dimension(:) :: lon,	&
       write(stderrunit,*) 'particles, read_restart_parts: lres = ',lres
     endif
 
+    print *,'calling pos_within_cell'
     if (lres) then ! True if the particle resides on the current processors computational grid
       lres=pos_within_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne, localpart%xi, localpart%yj)
       !call interp_flds(grd,localpart%ine,localpart%jne,localpart%xi,localpart%yj,localpart%uvel, localpart%vvel) !LUYU: we need to move this to evolve_parts.
@@ -392,6 +413,7 @@ real, allocatable,dimension(:) :: lon,	&
                id )
   end if
 
+  print *,'leaving read_restart_parts'
 
 end subroutine read_restart_parts
 
@@ -427,6 +449,7 @@ logical :: io_is_in_append_mode
   !Assemble the list of trajectories from all pes in this I/O tile
   call mpp_clock_begin(clock_trp)
 
+  print *,'in write_traj: 0001'
   !First add the trajs on the io_tile_root_pe (if any) to the I/O list
   if(is_io_tile_root_pe .OR. force_all_pes_traj ) then
      if(associated(trajectory)) then
@@ -444,7 +467,7 @@ logical :: io_is_in_append_mode
   !Now gather and append the parts from all pes in the io_tile to the list on corresponding io_tile_root_pe
   ntrajs_sent_io =0
   ntrajs_rcvd_io =0
-
+  print *,'in write_traj: 0002'
   if(is_io_tile_root_pe) then
      !Receive trajs from all pes in this I/O tile !FRAGILE!SCARY!
      do np=2,size(io_tile_pelist) ! Note: np starts from 2 to exclude self
@@ -477,6 +500,7 @@ logical :: io_is_in_append_mode
 
   endif !.NOT. force_all_pes_traj
 
+  print *,'in write_traj: 0003'
   call mpp_clock_end(clock_trp)
 
   !Now start writing in the io_tile_root_pe if there are any parts in the I/O list
@@ -500,7 +524,7 @@ logical :: io_is_in_append_mode
           write(filename,'(A,".",I6.6)') trim(filename), mpp_pe()
        endif
     endif
-
+  print *,'in write_traj: creating traj file'
     io_is_in_append_mode = .false.
     iret = nf_create(filename, NF_NOCLOBBER, ncid)
     if (iret .ne. NF_NOERR) then
@@ -517,19 +541,21 @@ logical :: io_is_in_append_mode
     endif
 
     if (io_is_in_append_mode) then
+        print *,'in write_traj: appending traj'
       iret = nf_inq_dimid(ncid, 'i', i_dim)
       if (iret .ne. NF_NOERR) write(stderrunit,*) 'particles, write_trajectory: nf_inq_dimid i failed'
       lonid = inq_varid(ncid, 'lon')
       latid = inq_varid(ncid, 'lat')
-      yearid = inq_varid(ncid, 'year')
+!      yearid = inq_varid(ncid, 'year')
       dayid = inq_varid(ncid, 'day')
       if (.not.save_short_traj) then
         uvelid = inq_varid(ncid, 'uvel')
         vvelid = inq_varid(ncid, 'vvel')
-        uoid = inq_varid(ncid, 'uo')
-        void = inq_varid(ncid, 'vo')
+!        uoid = inq_varid(ncid, 'uo')
+!        void = inq_varid(ncid, 'vo')
       endif
     else
+        print *,'in write_traj: ncdef'
       ! Dimensions
       iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
       if (iret .ne. NF_NOERR) write(stderrunit,*) 'particles, write_trajectory: nf_def_dim i failed'
@@ -537,13 +563,13 @@ logical :: io_is_in_append_mode
       ! Variables
       lonid = def_var(ncid, 'lon', NF_DOUBLE, i_dim)
       latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
-      yearid = def_var(ncid, 'year', NF_INT, i_dim)
+!      yearid = def_var(ncid, 'year', NF_INT, i_dim)
       dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
       if (.not. save_short_traj) then
         uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
         vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
-        uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
-        void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
+!        uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
+!        void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
       endif
 
       ! Attributes
@@ -553,8 +579,8 @@ logical :: io_is_in_append_mode
       call put_att(ncid, lonid, 'units', 'degrees_E')
       call put_att(ncid, latid, 'long_name', 'latitude')
       call put_att(ncid, latid, 'units', 'degrees_N')
-      call put_att(ncid, yearid, 'long_name', 'year')
-      call put_att(ncid, yearid, 'units', 'years')
+!      call put_att(ncid, yearid, 'long_name', 'year')
+!      call put_att(ncid, yearid, 'units', 'years')
       call put_att(ncid, dayid, 'long_name', 'year day')
       call put_att(ncid, dayid, 'units', 'days')
 
@@ -563,16 +589,17 @@ logical :: io_is_in_append_mode
         call put_att(ncid, uvelid, 'units', 'm/s')
         call put_att(ncid, vvelid, 'long_name', 'meridional spped')
         call put_att(ncid, vvelid, 'units', 'm/s')
-        call put_att(ncid, uoid, 'long_name', 'ocean zonal spped')
-        call put_att(ncid, uoid, 'units', 'm/s')
-        call put_att(ncid, void, 'long_name', 'ocean meridional spped')
-        call put_att(ncid, void, 'units', 'm/s')
+!        call put_att(ncid, uoid, 'long_name', 'ocean zonal spped')
+!        call put_att(ncid, uoid, 'units', 'm/s')
+!        call put_att(ncid, void, 'long_name', 'ocean meridional spped')
+!        call put_att(ncid, void, 'units', 'm/s')
       endif
     endif
 
     ! End define mode
     iret = nf_enddef(ncid)
 
+      print *,'in write_traj: nf_enddef'
     ! Write variables
     this=>traj4io
     if (io_is_in_append_mode) then
@@ -583,15 +610,19 @@ logical :: io_is_in_append_mode
     endif
     do while (associated(this))
       i=i+1
+      print *,'this%lon: ',this%lon
       call put_double(ncid, lonid, i, this%lon)
+      print *,'this%lat: ',this%lat
       call put_double(ncid, latid, i, this%lat)
-      call put_int(ncid, yearid, i, this%year)
+!      print *,'this%year: ',this%year
+!      call put_int(ncid, yearid, i, this%year)
+      print *,'this%day: ',this%day
       call put_double(ncid, dayid, i, this%day)
       if (.not. save_short_traj) then
         call put_double(ncid, uvelid, i, this%uvel)
         call put_double(ncid, vvelid, i, this%vvel)
-        call put_double(ncid, uoid, i, this%uo)
-        call put_double(ncid, void, i, this%vo)
+!        call put_double(ncid, uoid, i, this%uo)
+!        call put_double(ncid, void, i, this%vo)
       endif
       next=>this%next
       deallocate(this)
@@ -607,13 +638,14 @@ logical :: io_is_in_append_mode
 
 
 this=>trajectory
+print *,'done write_traj...'
 
-do while (.true.)
-
-  print *,'traj lon,lat,day= ',this%lon,this%lat,this%day
-  this=>this%next
-  if (.not. associated(this)) exit
-end do
+!do while (.true.)
+!
+!  print *,'traj lon,lat,day= ',this%lon,this%lat,this%day
+!  this=>this%next
+!  if (.not. associated(this)) exit
+!end do
 
 end subroutine write_trajectory
 

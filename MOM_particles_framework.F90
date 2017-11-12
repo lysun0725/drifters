@@ -5,11 +5,8 @@ module MOM_particles_framework
 ! This file is part of MOM6. See LICENSE.md for the license.
 
 use constants_mod, only: radius, pi, omega, HLF
-
 use MOM_grid, only : ocean_grid_type
 use MOM_diag_mediator, only : diag_ctrl
-
-
 use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
 use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_pe, mpp_root_pe, mpp_chksum
 use mpp_mod, only: COMM_TAG_1, COMM_TAG_2, COMM_TAG_3, COMM_TAG_4
@@ -17,7 +14,6 @@ use mpp_mod, only: COMM_TAG_5, COMM_TAG_6, COMM_TAG_7, COMM_TAG_8
 use mpp_mod, only: COMM_TAG_9, COMM_TAG_10
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, input_nml_file
 use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
-
 use mpp_domains_mod, only: domain2D
 use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
 use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
@@ -25,20 +21,17 @@ use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain, mpp_get_
 use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
 use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
 use mpp_domains_mod, only: mpp_define_io_domain
-
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
 use fms_mod, only: open_namelist_file, check_nml_error, close_file
 use fms_mod, only: clock_flag_default
-
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
-
 use diag_manager_mod, only: register_diag_field, register_static_field, send_data
 use diag_manager_mod, only: diag_axis_init
 
 implicit none ; private
 
-integer :: buffer_width=28 ! size of buffer dimension for comms
-integer :: buffer_width_traj=32  ! LUYU: modify this later. use?
+integer :: buffer_width=13 ! size of buffer dimension for comms
+integer :: buffer_width_traj=4  ! LUYU: modify this later. use?
 logical :: folded_north_on_pe = .false. !< If true, indicates the presence of the tri-polar grid
 logical :: verbose=.false. !< Be verbose to stderr
 logical :: debug=.false. !< Turn on debugging
@@ -145,8 +138,6 @@ type :: xyt
   real :: lat_old, lon_old   !< Previous position (degrees)
   real :: uvel, vvel         !< Current velocity components (m/s)
   real :: uvel_old, vvel_old !< Previous velocity components (m/s)
-  real :: axn, ayn, bxn, byn   !<Explicit and implicit accelerations (currently disabled)
-  real :: uo, vo               !< Interpolated ocean zonal and meridional velocities (m/s)
   integer :: year, particle_num  !< Current year and particle number
   type(xyt), pointer :: next=>null()  !< Pointer to the next position in the list
 end type xyt
@@ -497,17 +488,17 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   parts%debug_particle_with_id=debug_particle_with_id
 
 
-  if (debug) then
-    call grd_chksum2(grd, grd%lon, 'init lon')
-    call grd_chksum2(grd, grd%lat, 'init lat')
-    call grd_chksum2(grd, grd%lonc, 'init lonc')
-    call grd_chksum2(grd, grd%latc, 'init latc')
-    call grd_chksum2(grd, grd%area, 'init area')
-    call grd_chksum2(grd, grd%msk, 'init msk')
-    call grd_chksum2(grd, grd%cos, 'init cos')
-    call grd_chksum2(grd, grd%sin, 'init sin')
-    call grd_chksum2(grd, grd%ocean_depth, 'init ocean_depth')
-  endif
+! if (debug) then
+!    call grd_chksum2(grd, grd%lon, 'init lon')
+!    call grd_chksum2(grd, grd%lat, 'init lat')
+!    call grd_chksum2(grd, grd%lonc, 'init lonc')
+!    call grd_chksum2(grd, grd%latc, 'init latc')
+!    call grd_chksum2(grd, grd%area, 'init area')
+!    call grd_chksum2(grd, grd%msk, 'init msk')
+!    call grd_chksum2(grd, grd%cos, 'init cos')
+!    call grd_chksum2(grd, grd%sin, 'init sin')
+!    call grd_chksum2(grd, grd%ocean_depth, 'init ocean_depth')
+!  endif
 
   if (do_unit_tests) then
    if (unit_tests(parts)) call error_mesg('particles, particles_init', 'Unit tests failed!', FATAL)
@@ -1229,10 +1220,10 @@ integer :: counter, k, max_bonds, id_cnt, id_ij
   call push_buffer_value(buff%data(:,n), counter, part%start_day)
   call push_buffer_value(buff%data(:,n), counter, part%ine)
   call push_buffer_value(buff%data(:,n), counter, part%jne)
-  call push_buffer_value(buff%data(:,n), counter, part%axn)
-  call push_buffer_value(buff%data(:,n), counter, part%ayn)
-  call push_buffer_value(buff%data(:,n), counter, part%bxn)
-  call push_buffer_value(buff%data(:,n), counter, part%byn)
+!  call push_buffer_value(buff%data(:,n), counter, part%axn)
+!  call push_buffer_value(buff%data(:,n), counter, part%ayn)
+!  call push_buffer_value(buff%data(:,n), counter, part%bxn)
+!  call push_buffer_value(buff%data(:,n), counter, part%byn)
   call push_buffer_value(buff%data(:,n), counter, part%halo_part)
 
 
@@ -1357,10 +1348,10 @@ logical :: quick
   call pull_buffer_value(buff%data(:,n), counter, localpart%start_day)
   call pull_buffer_value(buff%data(:,n), counter, localpart%ine)
   call pull_buffer_value(buff%data(:,n), counter, localpart%jne)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%axn)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%ayn)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%bxn)
-  call pull_buffer_value(buff%data(:,n), counter, localpart%byn)
+!  call pull_buffer_value(buff%data(:,n), counter, localpart%axn)
+!  call pull_buffer_value(buff%data(:,n), counter, localpart%ayn)
+!  call pull_buffer_value(buff%data(:,n), counter, localpart%bxn)
+!  call pull_buffer_value(buff%data(:,n), counter, localpart%byn)
   call pull_buffer_value(buff%data(:,n), counter, localpart%halo_part)
 
 
@@ -1388,8 +1379,8 @@ logical :: quick
          & mpp_pe(),') Failed to find i,j=',localpart%ine,localpart%jne,' for lon,lat=',localpart%lon,localpart%lat
         write(stderrunit,*) localpart%lon,localpart%lat
         write(stderrunit,*) localpart%uvel,localpart%vvel
-        write(stderrunit,*) localpart%axn,localpart%ayn !Alon
-        write(stderrunit,*) localpart%bxn,localpart%byn !Alon
+ !       write(stderrunit,*) localpart%axn,localpart%ayn !Alon
+ !       write(stderrunit,*) localpart%bxn,localpart%byn !Alon
         write(stderrunit,*) localpart%uvel_old,localpart%vvel_old
         write(stderrunit,*) localpart%lon_old,localpart%lat_old
         write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
@@ -1523,19 +1514,14 @@ end subroutine increase_ibuffer
 
     buff%data(1,n)=traj%lon
     buff%data(2,n)=traj%lat
-    buff%data(3,n)=float(traj%year)
-    buff%data(4,n)=traj%day
-    buff%data(5,n)=traj%uvel
-    buff%data(6,n)=traj%vvel
-    buff%data(24,n)=traj%axn !Alon
-    buff%data(25,n)=traj%ayn !Alon
-    buff%data(26,n)=traj%bxn !Alon
-    buff%data(27,n)=traj%byn !Alon
-    buff%data(28,n)=traj%uvel_old !Alon
-    buff%data(29,n)=traj%vvel_old !Alon
-    buff%data(30,n)=traj%lon_old !Alon
-    buff%data(31,n)=traj%lat_old !Alon
-    buff%data(32,n)=float(traj%particle_num)
+    buff%data(3,n)=traj%day
+    buff%data(4,n)=traj%uvel
+    buff%data(5,n)=traj%vvel
+    buff%data(6,n)=traj%uvel_old !Alon
+    buff%data(7,n)=traj%vvel_old !Alon
+    buff%data(8,n)=traj%lon_old !Alon
+    buff%data(9,n)=traj%lat_old !Alon
+    buff%data(10,n)=float(traj%particle_num)
 
   end subroutine pack_traj_into_buffer2
 
@@ -1552,19 +1538,19 @@ end subroutine increase_ibuffer
 
     traj%lon=buff%data(1,n)
     traj%lat=buff%data(2,n)
-    traj%year=nint(buff%data(3,n))
-    traj%day=buff%data(4,n)
-    traj%uvel=buff%data(5,n)
-    traj%vvel=buff%data(6,n)
-    traj%axn=buff%data(9,n) !Alon
-    traj%ayn=buff%data(10,n) !Alon
-    traj%bxn=buff%data(11,n) !Alon
-    traj%byn=buff%data(12,n) !Alon
-    traj%uvel_old=buff%data(13,n) !Alon
-    traj%vvel_old=buff%data(14,n) !Alon
-    traj%lon_old=buff%data(15,n) !Alon
-    traj%lat_old=buff%data(16,n) !Alon
-    traj%particle_num=nint(buff%data(17,n))
+!    traj%year=nint(buff%data(3,n))
+    traj%day=buff%data(3,n)
+    traj%uvel=buff%data(4,n)
+    traj%vvel=buff%data(5,n)
+!    traj%axn=buff%data(9,n) !Alon
+!    traj%ayn=buff%data(10,n) !Alon
+!    traj%bxn=buff%data(11,n) !Alon
+!    traj%byn=buff%data(12,n) !Alon
+    traj%uvel_old=buff%data(6,n) !Alon
+    traj%vvel_old=buff%data(7,n) !Alon
+    traj%lon_old=buff%data(8,n) !Alon
+    traj%lat_old=buff%data(9,n) !Alon
+    traj%particle_num=nint(buff%data(10,n))
 
     call append_posn(first, traj)
 
@@ -1870,10 +1856,10 @@ type(particle), pointer :: part1, part2
   if (part1%lat.ne.part2%lat) return
   if (part1%uvel.ne.part2%uvel) return
   if (part1%vvel.ne.part2%vvel) return
-  if (part1%axn.ne.part2%axn) return  !Alon
-  if (part1%ayn.ne.part2%ayn) return  !Alon
-  if (part1%bxn.ne.part2%bxn) return  !Alon
-  if (part1%byn.ne.part2%byn) return  !Alon
+!  if (part1%axn.ne.part2%axn) return  !Alon
+!  if (part1%ayn.ne.part2%ayn) return  !Alon
+!  if (part1%bxn.ne.part2%bxn) return  !Alon
+!  if (part1%byn.ne.part2%byn) return  !Alon
   if (part1%uvel_old.ne.part2%uvel_old) return  !Alon
   if (part1%vvel_old.ne.part2%vvel_old) return  !Alon
   if (part1%lon_old.ne.part2%lon_old) return  !Alon
@@ -1978,10 +1964,10 @@ integer, optional, intent(in) :: jl !< j-index of cell part should be in
     label, 'pe=(', mpp_pe(), ') #=', part%id, &
     ' u,v=', part%uvel, part%vvel, &
     ' uvel_old,vvel_old=', part%uvel_old, part%vvel_old
-  write(iochan,'("particles, print_part: ",2a,i5,a,i12,2(a,2f14.8))') &
-    label, 'pe=(', mpp_pe(), ') #=', part%id, &
-    ' axn,ayn=', part%axn, part%ayn, &
-    ' bxn,byn=', part%bxn, part%byn
+!  write(iochan,'("particles, print_part: ",2a,i5,a,i12,2(a,2f14.8))') &
+!    label, 'pe=(', mpp_pe(), ') #=', part%id, &
+!    ' axn,ayn=', part%axn, part%ayn, &
+!    ' bxn,byn=', part%bxn, part%byn
 end subroutine print_part
 
 
@@ -2075,10 +2061,10 @@ integer :: grdi, grdj
       if (.not. parts%save_short_traj) then !Not totally sure that this is correct
         posn%uvel=this%uvel
         posn%vvel=this%vvel
-        posn%axn=this%axn
-        posn%ayn=this%ayn
-        posn%bxn=this%bxn
-        posn%byn=this%byn
+!        posn%axn=this%axn
+!        posn%ayn=this%ayn
+!        posn%bxn=this%bxn
+!        posn%byn=this%byn
         posn%uvel_old=this%uvel_old
         posn%vvel_old=this%vvel_old
         posn%lon_old=this%lon_old
@@ -2918,16 +2904,16 @@ character(len=*) :: label
   if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'particles: checksumming gridded data @ ',trim(label)
 
   ! static
-  call grd_chksum2(grd, grd%lon, 'lon')
-  call grd_chksum2(grd, grd%lat, 'lat')
-  call grd_chksum2(grd, grd%lonc, 'lonc')
-  call grd_chksum2(grd, grd%latc, 'latc')
-  call grd_chksum2(grd, grd%dx, 'dx')
-  call grd_chksum2(grd, grd%dy, 'dy')
-  call grd_chksum2(grd, grd%msk, 'msk')
-  call grd_chksum2(grd, grd%cos, 'cos')
-  call grd_chksum2(grd, grd%sin, 'sin')
-  call grd_chksum2(grd, grd%ocean_depth, 'depth')
+!  call grd_chksum2(grd, grd%lon, 'lon')
+!  call grd_chksum2(grd, grd%lat, 'lat')
+!  call grd_chksum2(grd, grd%lonc, 'lonc')
+!  call grd_chksum2(grd, grd%latc, 'latc')
+!  call grd_chksum2(grd, grd%dx, 'dx')
+!  call grd_chksum2(grd, grd%dy, 'dy')
+!  call grd_chksum2(grd, grd%msk, 'msk')
+!  call grd_chksum2(grd, grd%cos, 'cos')
+!  call grd_chksum2(grd, grd%sin, 'sin')
+!  call grd_chksum2(grd, grd%ocean_depth, 'depth')
 
 end subroutine checksum_gridded
 
@@ -3101,16 +3087,16 @@ integer :: grdi, grdj
       fld(i,2) = this%lat
       fld(i,3) = this%uvel
       fld(i,4) = this%vvel
-      fld(i,9) = this%axn !added by Alon
-      fld(i,10) = this%ayn !added by Alon
-      fld(i,11) = this%bxn !added by Alon
-      fld(i,12) = this%byn !added by Alon
-      fld(i,13) = this%uvel_old !added by Alon
-      fld(i,14) = this%vvel_old !added by Alon
-      fld(i,15) = this%lon_old !added by Alon
-      fld(i,16) = this%lat_old !added by Alon
-      fld(i,17) = time_hash(this) !Changed from 9 to 17 by Alon
-      fld(i,18) = pos_hash(this) !Changed from 10 to 18 by Alon
+!      fld(i,9) = this%axn !added by Alon
+!      fld(i,10) = this%ayn !added by Alon
+!      fld(i,11) = this%bxn !added by Alon
+!      fld(i,12) = this%byn !added by Alon
+      fld(i,5) = this%uvel_old !added by Alon
+      fld(i,6) = this%vvel_old !added by Alon
+      fld(i,7) = this%lon_old !added by Alon
+      fld(i,8) = this%lat_old !added by Alon
+!      fld(i,17) = time_hash(this) !Changed from 9 to 17 by Alon
+!      fld(i,18) = pos_hash(this) !Changed from 10 to 18 by Alon
       fld(i,19) = float(ipart) !Changed from 11 to 19 by Alon
       icnt(this%ine,this%jne)=icnt(this%ine,this%jne)+1
       fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) ) !*float( i )
@@ -3149,7 +3135,7 @@ integer :: grdi, grdj
       txt, 'chksum', ichk1, 'chksum2', ichk2, 'chksum3', ichk3, 'chksum4', ichk4, 'chksum5', ichk5, '#', nparts
 
   grd%tmp(:,:)=real(icnt(:,:))
-  call grd_chksum2(grd,grd%tmp,'# of parts/cell')
+!  call grd_chksum2(grd,grd%tmp,'# of parts/cell')
 
   deallocate( fld )
   deallocate( fld2 )
@@ -3183,8 +3169,8 @@ integer function part_chksum(part )
 ! Arguments
 type(particle), pointer :: part
 ! Local variables
-real :: rtmp(17) !Changed from 28 to 34 by Alon
-integer :: itmp(36+4), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
+real :: rtmp(13) !Changed from 28 to 34 by Alon
+integer :: itmp(17), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
 integer :: i
 
   rtmp(:)=0.
@@ -3197,23 +3183,23 @@ integer :: i
   rtmp(7)=part%start_day
   rtmp(8)=part%xi
   rtmp(9)=part%yj
-  rtmp(10)=part%axn !Added by Alon
-  rtmp(11)=part%ayn !Added by Alon
-  rtmp(12)=part%bxn !Added by Alon
-  rtmp(13)=part%byn !Added by Alon
-  rtmp(14)=part%uvel_old !Added by Alon
-  rtmp(15)=part%vvel_old !Added by Alon
-  rtmp(16)=part%lat_old !Added by Alon
-  rtmp(17)=part%lon_old !Added by Alon
+ ! rtmp(10)=part%axn !Added by Alon
+ ! rtmp(11)=part%ayn !Added by Alon
+ ! rtmp(12)=part%bxn !Added by Alon
+ ! rtmp(13)=part%byn !Added by Alon
+  rtmp(10)=part%uvel_old !Added by Alon
+  rtmp(11)=part%vvel_old !Added by Alon
+  rtmp(12)=part%lat_old !Added by Alon
+  rtmp(13)=part%lon_old !Added by Alon
 
-  itmp(1:17)=transfer(rtmp,i8) !Changed from 28 to 36 by Alon
-  itmp(18)=part%start_year !Changed from 29 to 37 by Alon
-  itmp(19)=part%ine !Changed from 30 to 38 by Alon
-  itmp(20)=part%jne !Changed from 31 to 39 by Alon
-  itmp(21)=part%particle_num !added  by Alon
+  itmp(1:13)=transfer(rtmp,i8) !Changed from 28 to 36 by Alon
+  itmp(14)=part%start_year !Changed from 29 to 37 by Alon
+  itmp(15)=part%ine !Changed from 30 to 38 by Alon
+  itmp(16)=part%jne !Changed from 31 to 39 by Alon
+  itmp(17)=part%particle_num !added  by Alon
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,21 !Changd from 28 to 37 by Alon
+  do i=1,17 !Changd from 28 to 37 by Alon
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i

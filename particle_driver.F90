@@ -24,6 +24,8 @@ PROGRAM particle_driver
   use MOM_restart, only : restore_state, restart_init, register_restart_field, restart_end
   use MOM_diag_mediator, only : diag_mediator_infrastructure_init
   use time_manager_mod, only: time_type, set_time, set_date, JULIAN, NOLEAP, NO_CALENDAR, set_calendar_type, operator(+)
+  use time_manager_mod, only : increment_time, operator(<)
+  use time_interp_external_mod, only : init_external_field, time_interp_external, time_interp_external_init
   use ensemble_manager_mod, only : get_ensemble_size, ensemble_manager_init, ensemble_pelist_setup
   use mpp_mod, only : set_current_pelist => mpp_set_current_pelist
   use MOM_particles_mod, only : particles_init
@@ -34,15 +36,16 @@ PROGRAM particle_driver
   implicit none
 
   type(ocean_grid_type), target :: Grid
-  type(verticalGrid_type), target :: GV
-  type(dyn_horgrid_type), pointer :: dG => NULL()
+  type(verticalGrid_type), pointer :: GV
+  type(dyn_horgrid_type), pointer :: dG=> NULL()
   type(MOM_control_struct), allocatable, target, dimension(:) :: CSp !<pointer of ensemble list of MOM control structures
   type(MOM_control_struct), pointer :: CS=> NULL() !<pointer to an element in CSp
   type(hor_index_type)   :: HI ! A hor_index_type for array extents
   type(particles), pointer, dimension(:)  :: drifters_ens !< drifter ensemble
   type(particles), pointer :: node=>NULL() !<pointer to an element in drifters list
-  type(time_type) :: time, time_start, time_start_segment, time_end, time_in, time_step_ocean
+  type(time_type) :: time_start, time_start_segment, time_end, time_in, time_step_ocean
   real :: time_step
+  type(time_type), allocatable, dimension(:), target :: Time
   character(len=128) :: history_file
   character(len=32)  :: topo_file
   character(len=32)  :: drifter_file
@@ -60,6 +63,7 @@ PROGRAM particle_driver
   character(len=16) :: month='jan',calendar='julian'
   logical :: concurrent = .false. !<use concurrent PE execution of model components
   integer :: date_init(6), date(6), years=0, months=0, days=0, hours=0, minutes=0, seconds=0
+  integer, dimension(:), allocatable :: fms_id_u, fms_id_v
   integer :: yr, mon, day, hr, min, sec, dt_seconds
   integer :: is, ie, js, je, isd, ied, jsd, jed, IscB, IecB, JscB, JecB, IsdB, IedB, JsdB, JedB
   integer :: ierr, io_status, n, nz, unit, num_tsteps, m
@@ -69,7 +73,7 @@ PROGRAM particle_driver
 
   namelist /particle_driver_nml/ date_init, calendar, months, days, hours, minutes, seconds, dt_seconds, num_tsteps
 
-  call MOM_infra_init(); call io_infra_init()
+  call MOM_infra_init(); call io_infra_init(); call time_interp_external_init()
   call ensemble_manager_init(); ens_info = get_ensemble_size()
   ens_size=ens_info(1); nPEs_ocn=ens_info(2); nPEs_atm=nPEs_ocn; nPEs_lnd=nPEs_ocn; nPEs_ice=nPEs_ocn
   allocate(ocn_pelist(nPEs_ocn))
@@ -80,9 +84,10 @@ PROGRAM particle_driver
   call ensemble_pelist_setup(concurrent,nPEs_atm,nPES_ocn,nPES_lnd,npes_ice,&
        atm_pelist,ocn_pelist,lnd_pelist,ice_pelist)
   call set_current_pelist(ocn_pelist)
-  allocate(CSp(nPEs_ocn))
-  allocate(drifters_ens(nPEs_ocn))
-
+  allocate(CSp(ens_size))
+  allocate(drifters_ens(ens_size))
+  allocate(fms_id_u(ens_size)); fms_id_u(:)=-1
+  allocate(fms_id_v(ens_size)); fms_id_v(:)=-1
   num_tsteps = 1; dt_seconds = 3600
   call open_file(unit,'input.nml',form=ASCII_FILE,action=READONLY_FILE)
   read(unit,particle_driver_nml,iostat=io_status)
@@ -110,51 +115,66 @@ PROGRAM particle_driver
   if (sum(date_init)>0) time_start=set_date(date_init(1),date_init(2), date_init(3), &
        date_init(4), date_init(5), date_init(6))
 
+  if (days+seconds>0) then
+    time_end = increment_time(time_start,seconds,days)
+  else
+    time_end = increment_time(time_start,dt_seconds*num_tsteps)
+  endif
+
+  allocate(Time(ens_size))
+
   if (sum(date)>0) then
     time_start_segment = time_start
-    time=time_start_segment
+    do n=1,ens_size
+      Time(n)=time_start_segment
+    enddo
   else
-    time=time_start
+    do n=1,ens_size
+      Time(n)=time_start
+    enddo
   endif
 
   time_step_ocean = set_time(dt_seconds)
 
-  call MOM_domains_init(Grid%domain,PF)
-  call MOM_io_init(PF)
+  allocate(dG)
 
-  call diag_mediator_infrastructure_init()
-
-  call hor_index_init(Grid%Domain, HI, PF, &
-       local_indexing=.true.)
-
-  call create_dyn_horgrid(dG,HI)
-  call clone_MOM_domain(Grid%Domain, dG%Domain)
-
-
-  do n=1,nPEs_ocn
+  do n=1,ens_size
     CS=>CSp(n)
-    call verticalGridInit( PF, CS%GV )
-    call MOM_initialize_fixed(dG,CS%OBC,PF,.false.,dirs%output_directory)
-    call MOM_initialize_coord(CS%GV, PF, .false., &
-       dirs%output_directory, CS%tv, dG%max_depth)
+    call MOM_domains_init(CS%G%domain,PF)
+    call MOM_io_init(PF)
+    call diag_mediator_infrastructure_init()
+    call hor_index_init(CS%G%Domain, HI, PF, &
+       local_indexing=.true.)
+    call create_dyn_horgrid(dG,HI)
+    call clone_MOM_domain(CS%G%Domain, dG%Domain)
   enddo
 
-  is   = dG%isc   ; ie   = dG%iec  ; js   = dG%jsc  ; je   = dG%jec ; nz = CS%GV%ke
-  isd  = dG%isd   ; ied  = dG%ied  ; jsd  = dG%jsd  ; jed  = dG%jed
-  IsdB = dG%IsdB  ; IedB = dG%IedB ; JsdB = dG%JsdB ; JedB = dG%JedB
+  call MOM_initialize_fixed(dG,CSp(1)%OBC,PF,.false.,dirs%output_directory)
+  print *,'finished initialize_fixed'
+  call verticalGridInit( PF, GV )
+  call MOM_initialize_coord(GV, PF, .false., &
+       dirs%output_directory, CSp(1)%tv, dG%max_depth)
+  print *,'finished initialize_coord'
 
-  call MOM_grid_init(Grid, PF, HI)
-  call copy_dyngrid_to_MOM_grid(dG, Grid)
 
-  thickness_units = get_thickness_units(GV)
-
-  do n=1,nPEs_ocn
+  do n=1,ens_size
+    print *,'ensemble number ',n
     CS=>CSp(n)
-    CS%GV=>GV
+    CS%GV => GV
+    call MOM_grid_init(CS%G, PF, HI)
+    print *,'finished grid init'
+    call copy_dyngrid_to_MOM_grid(dG, CS%G)
+    is   = CS%G%isc   ; ie   = CS%G%iec  ; js   = CS%G%jsc  ; je   = CS%G%jec
+    nz = CS%GV%ke
+    isd  = CS%G%isd   ; ied  = CS%G%ied  ; jsd  = CS%G%jsd  ; jed  = CS%G%jed
+    IsdB = CS%G%IsdB  ; IedB = CS%G%IedB ; JsdB = CS%G%JsdB ; JedB = CS%G%JedB
+    thickness_units = get_thickness_units(CS%GV)
+
     ! Allocate and initialize space for MOM velocities and thicknesses
     allocate(CS%u(IsdB:IedB,jsd:jed,nz))   ; CS%u(:,:,:) = 0.0
     allocate(CS%v(isd:ied,JsdB:JedB,nz))   ; CS%v(:,:,:) = 0.0
     allocate(CS%h(isd:ied,jsd:jed,nz))     ; CS%h(:,:,:) = GV%Angstrom
+    CS%Time=>Time(n)
     call restart_init(PF,CS%restart_CSp)
     vd = var_desc("h",thickness_units,"Layer Thickness")
     call register_restart_field(CS%h, vd, .true., CS%restart_CSp)
@@ -162,29 +182,39 @@ PROGRAM particle_driver
     call register_restart_field(CS%u, vd, .true., CS%restart_CSp)
     vd = var_desc("v","meter second-1","Meridional velocity",'v','L')
     call register_restart_field(CS%v, vd, .true., CS%restart_CSp)
-    call restore_state(dirs%input_filename, dirs%restart_input_dir, Time, Grid,CS%restart_CSp)
-    call create_group_pass(CS%pass_uv_T_S_h, CS%u, CS%v, Grid%Domain)
-
+    call restore_state(dirs%input_filename, dirs%restart_input_dir, CS%Time, CS%G,CS%restart_CSp)
+    print *,'G'
+    call create_group_pass(CS%pass_uv_T_S_h, CS%u, CS%v, CS%G%Domain)
+    print *,'Calling init_external_field'
+    print *,CS%G%Domain%symmetric
+!    fms_id_u(n) = init_external_field('prog.nc','u',domain=CS%G%Domain%mpp_domain)
+!    fms_id_v(n) = init_external_field('prog.nc','v',domain=CS%G%Domain%mpp_domain)
   enddo
 
   call destroy_dyn_horgrid(dG)
 
-  do n=1,nPEs_ocn
+  do n=1,ens_size
+    print *,'n= ',n
     CS=>CSp(n)
     node=>drifters_ens(n)
-    call particles_init( node, Grid, Time, real(dt_seconds), CS)
+    call particles_init( node, CS%G, CS%Time, real(dt_seconds), CS)
   enddo
 
-  do m = 1,num_tsteps
-    do n=1,nPEs_ocn
-      CS=>CSp(n)
-      node=>drifters_ens(n)
-      call particles_run(node,time,CS%u(:,:,1),CS%v(:,:,1)) ! Run the particles model
+  do n=1,ens_size
+    CS=>CSp(n)
+    do while (CS%Time < time_end)
+     CS%Time=CS%Time+time_step_ocean
+     node=>drifters_ens(n)
+!      call time_interp_external(fms_id_u(n),CS%time,CS%u)
+!      call time_interp_external(fms_id_v(n),CS%time,CS%v)
+     call particles_run(node,CS%Time,CS%u(:,:,1)*100.,CS%v(:,:,1)*100.) ! Run the particles model
     enddo
-    time=time+time_step_ocean
   enddo
 
-  do n=1,nPEs_ocn
+
+  print *,'saving restart'
+
+  do n=1,ens_size
     node=>drifters_ens(n)
     call particles_save_restart(node)
   enddo
