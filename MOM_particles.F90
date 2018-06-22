@@ -2,7 +2,6 @@ module MOM_particles_mod
 
 use constants_mod, only: radius, pi, omega, HLF
 use MOM_grid, only : ocean_grid_type
-use MOM_diag_mediator, only : diag_ctrl
 use MOM_time_manager, only : time_type, get_date, operator(-)
 
 use fms_mod, only: field_exist, get_global_att_value
@@ -23,7 +22,6 @@ use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
 
 
 use diag_manager_mod, only: send_data
-!use diag_manager_mod, only: diag_axis_init
 
 use MOM, only : MOM_control_struct
 
@@ -68,13 +66,13 @@ real, parameter :: Rearth=6360000. !< Radius of earth (m)
 contains
 
 ! ##############################################################################
-subroutine particles_init(parts, Grid, Time, dt, MOM_CS)
+subroutine particles_init(parts, Grid, Time, dt, u, v)
 
  type(particles), pointer, intent(out) :: parts
  type(ocean_grid_type), target, intent(in) :: Grid !< Grid type from parent model
  type(time_type), intent(in) :: Time !< Time type from parent model
  real, intent(in)            :: dt !< particle timestep in seconds
- type(MOM_control_struct), pointer, intent(in) :: MOM_CS
+ real, dimension(:,:,:)      :: u, v !< Horizontal velocity fields
 
  integer :: io_layout(2)
  integer :: stdlogunit, stderrunit
@@ -88,13 +86,12 @@ subroutine particles_init(parts, Grid, Time, dt, MOM_CS)
  gni = Grid%ieg - Grid%isg + 1
  gnj = Grid%jeg - Grid%jsg + 1
 
- call particles_framework_init(parts, &
-             Grid, Time, dt, MOM_CS%diag)
+ call particles_framework_init(parts, Grid, Time, dt)
  print *,'done particles_framework_init'
  call mpp_clock_begin(parts%clock_ior)
  call particles_io_init(parts,Grid%Domain%io_layout)
  print *,'done particles_io_init'
- call read_restart_parts(parts,Time, MOM_CS)
+ call read_restart_parts(parts,Time, u, v)
  print *,'done read_restart_parts'
 ! call parts_chksum(parts, 'read_restart_particles')
  call mpp_clock_end(parts%clock_ior)

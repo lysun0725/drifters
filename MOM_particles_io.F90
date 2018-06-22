@@ -25,7 +25,6 @@ use fms_mod,    only : clock_flag_default
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 use MOM_grid, only : ocean_grid_type
-use MOM, only      : MOM_control_struct
 
 use MOM_particles_framework, only: particles_gridded, xyt, particle, particles, buffer
 use MOM_particles_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
@@ -285,11 +284,11 @@ end subroutine write_restart
 
 ! ##############################################################################
 
-subroutine read_restart_parts(parts,Time, MOM_CS)
+subroutine read_restart_parts(parts,Time, u, v)
 ! Arguments
 type(particles), pointer :: parts
 type(time_type), intent(in) :: Time
-type(MOM_control_struct), pointer, intent(in) :: MOM_CS
+real, dimension(:,:,:) :: u, v
 
 !Local variables
 integer :: k, siz(4), nparts_in_file, nparts_read
@@ -330,19 +329,17 @@ real, allocatable,dimension(:) :: lon,	&
 
   do j=grd%jsd,grd%jed
     do i=grd%isd,grd%ied
-       grd%uo(i,j) = MOM_CS%u(i,j,1)
+       grd%uo(i,j) = u(i,j,1)
     enddo
   enddo
 
   do j=grd%jsd,grd%jed
     do i=grd%isd,grd%ied
-       grd%vo(i,j) = MOM_CS%v(i,j,1)
+       grd%vo(i,j) = v(i,j,1)
     enddo
   enddo
 
   print *,'in read_restart_parts (3)'
-!  grd%uo=> MOM_CS%u(:,:,1)
-!  grd%vo=> MOM_CS%v(:,:,1)
 
   ! Zero out nparts_in_file
   nparts_in_file = 0

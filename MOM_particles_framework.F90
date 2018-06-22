@@ -6,7 +6,6 @@ module MOM_particles_framework
 
 use constants_mod, only: radius, pi, omega, HLF
 use MOM_grid, only : ocean_grid_type
-use MOM_diag_mediator, only : diag_ctrl
 use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
 use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_pe, mpp_root_pe, mpp_chksum
 use mpp_mod, only: COMM_TAG_1, COMM_TAG_2, COMM_TAG_3, COMM_TAG_4
@@ -231,13 +230,12 @@ contains
 
 ! ##############################################################################
 
-subroutine particles_framework_init(parts, Grid, Time, dt, diag_axes)
+subroutine particles_framework_init(parts, Grid, Time, dt)
 
 
 ! Arguments
 type(particles), pointer, intent(out) :: parts
 type(ocean_grid_type), target, intent(in) :: Grid
-type(diag_ctrl), intent(in)  :: diag_axes
 real, intent(in) :: dt
 type(time_type), intent(in) :: Time
 
