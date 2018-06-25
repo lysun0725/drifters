@@ -23,8 +23,6 @@ use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
 
 use diag_manager_mod, only: send_data
 
-use MOM, only : MOM_control_struct
-
 use MOM_particles_framework, only: particles_framework_init
 use MOM_particles_framework, only: particles_gridded, xyt, particle, particles, buffer
 use MOM_particles_framework, only: verbose, really_debug,debug,use_roundoff_fix
