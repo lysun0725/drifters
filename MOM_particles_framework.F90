@@ -290,6 +290,8 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
 
   write (stdlogunit, particles_nml)
 
+  ! Allocate memory
+  allocate(parts)
 
   grd=>parts%grd
   grd%domain => Grid%domain%mpp_domain
