@@ -231,35 +231,31 @@ contains
 ! ##############################################################################
 
 subroutine particles_framework_init(parts, Grid, Time, dt)
+  type(particles), pointer :: parts !< Particles to be allocated
+  type(ocean_grid_type), target, intent(in) :: Grid !< MOM6 grid
+  real, intent(in) :: dt !< Time step (s)
+  type(time_type), intent(in) :: Time !< Model time
 
+  ! Namelist parameters (and defaults)
+  integer :: halo=4 ! Width of halo region
+  integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
+  integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
+  integer :: verbose_hrs=24 ! Period between verbose messages
+  real :: Lx=360. ! Length of domain in x direction, used for periodicity (use a huge number for non-periodic)
+  logical :: Runge_not_Verlet=.True. ! True=Runge Kutta, False=Verlet.
+  logical :: grid_is_latlon=.True. ! True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
+  logical :: grid_is_regular=.True. ! Flag to say whether point in cell can be found assuming regular Cartesian grid
+  logical :: ignore_missing_restart_parts=.False. ! True Allows the model to ignore particles missing in the restart.
+  logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
+  logical :: save_short_traj=.false. ! True saves only lon,lat,time,id in particle_trajectory.nc
+  logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
+  logical :: use_new_predictive_corrective =.False. ! Flag to use Bob's predictive corrective particle scheme- Added by Alon
+  logical :: do_unit_tests=.false. ! Conduct some unit tests
+  logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
+  logical :: read_old_restarts=.false. ! Legacy option that does nothing
+  integer(kind=8) :: debug_particle_with_id = -1 ! If positive, monitors a part with this id
 
-! Arguments
-type(particles), pointer, intent(out) :: parts
-type(ocean_grid_type), target, intent(in) :: Grid
-real, intent(in) :: dt
-type(time_type), intent(in) :: Time
-
-
-! Namelist parameters (and defaults)
-integer :: halo=4 ! Width of halo region
-integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
-integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
-integer :: verbose_hrs=24 ! Period between verbose messages
-real :: Lx=360. ! Length of domain in x direction, used for periodicity (use a huge number for non-periodic)
-logical :: Runge_not_Verlet=.True. ! True=Runge Kutta, False=Verlet.
-logical :: grid_is_latlon=.True. ! True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
-logical :: grid_is_regular=.True. ! Flag to say whether point in cell can be found assuming regular Cartesian grid
-logical :: ignore_missing_restart_parts=.False. ! True Allows the model to ignore particles missing in the restart.
-logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
-logical :: save_short_traj=.false. ! True saves only lon,lat,time,id in particle_trajectory.nc
-logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
-logical :: use_new_predictive_corrective =.False. ! Flag to use Bob's predictive corrective particle scheme- Added by Alon
-logical :: do_unit_tests=.false. ! Conduct some unit tests
-logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
-logical :: read_old_restarts=.false. ! Legacy option that does nothing
-integer(kind=8) :: debug_particle_with_id = -1 ! If positive, monitors a part with this id
-
-namelist /particles_nml/ verbose, halo,  traj_sample_hrs, traj_write_hrs, save_short_traj,  &
+  namelist /particles_nml/ verbose, halo,  traj_sample_hrs, traj_write_hrs, save_short_traj,  &
          verbose_hrs,  &
          debug, really_debug, ignore_missing_restart_parts, &
          parallel_reprod, use_slow_find, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, &
@@ -269,14 +265,12 @@ namelist /particles_nml/ verbose, halo,  traj_sample_hrs, traj_write_hrs, save_s
          grid_is_regular, &
          ignore_traj, debug_particle_with_id, read_old_restarts
 
-
-! Local variables
-integer :: ierr, iunit, i, j, id_class, is, ie, js, je, np
-type(particles_gridded), pointer :: grd
-real :: lon_mod, big_number
-logical :: lerr
-integer :: stdlogunit, stderrunit
-
+  ! Local variables
+  integer :: ierr, iunit, i, j, id_class, is, ie, js, je, np
+  type(particles_gridded), pointer :: grd
+  real :: lon_mod, big_number
+  logical :: lerr
+  integer :: stdlogunit, stderrunit
 
   ! Get the stderr and stdlog unit numbers
   stderrunit=stderr()
