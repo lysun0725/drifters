@@ -79,7 +79,7 @@ public monitor_a_part
 public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
 public check_for_duplicates_in_parallel
-public id_from_2_ints
+public split_id, id_from_2_ints
 
 !> Container for gridded fields
 type :: particles_gridded
@@ -138,6 +138,7 @@ type :: xyt
   real :: uvel, vvel         !< Current velocity components (m/s)
   real :: uvel_old, vvel_old !< Previous velocity components (m/s)
   integer :: year, particle_num  !< Current year and particle number
+  integer(kind=8) :: id = -1 !< Particle Identifier
   type(xyt), pointer :: next=>null()  !< Pointer to the next position in the list
 end type xyt
 
@@ -3326,18 +3327,18 @@ end function id_from_2_ints
 ! #################################################################################
 
 !> Split an particle ID into two parts
-!subroutine split_id(id, counter, ijhash)
-!  integer(kind=8), intent(in)  :: id      !< A unique id assigned when a part is created
-!  integer,         intent(out) :: counter !< The counter value assigned at calving
-!  integer,         intent(out) :: ijhash  !< A hash of i,j calving location
-!  ! Local variables
-!  integer(kind=8) :: i8
-!
-!  counter = ishft(id,-32)
-!  !counter = i8
-!  ijhash = int(id,4)
-!
-!end subroutine split_id
+subroutine split_id(id, counter, ijhash)
+  integer(kind=8), intent(in)  :: id      !< A unique id assigned when a part is created
+  integer,         intent(out) :: counter !< The counter value assigned at calving
+  integer,         intent(out) :: ijhash  !< A hash of i,j calving location
+  ! Local variables
+  integer(kind=8) :: i8
+
+  counter = ishft(id,-32)
+  !counter = i8
+  ijhash = int(id,4)
+
+end subroutine split_id
 
 ! #################################################################################
 !> Checks answer to right answer and prints results if different

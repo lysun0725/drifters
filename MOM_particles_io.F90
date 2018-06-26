@@ -41,7 +41,7 @@ use MOM_particles_framework, only: verbose, really_debug, debug, restart_input_d
 use MOM_particles_framework, only: ignore_ij_restart, use_slow_find,generate_test_particles!,print_part
 use MOM_particles_framework, only: force_all_pes_traj
 !use particles_framework, only: check_for_duplicates_in_parallel
-!use MOM_particles_framework, only: split_id, id_from_2_ints, generate_id
+use MOM_particles_framework, only: split_id !, id_from_2_ints, generate_id
 
 implicit none ; private
 
@@ -545,6 +545,8 @@ logical :: io_is_in_append_mode
       latid = inq_varid(ncid, 'lat')
 !      yearid = inq_varid(ncid, 'year')
       dayid = inq_varid(ncid, 'day')
+      idcntid = inq_varid(ncid, 'id_cnt')
+      idijid = inq_varid(ncid, 'id_ij')
       if (.not.save_short_traj) then
         uvelid = inq_varid(ncid, 'uvel')
         vvelid = inq_varid(ncid, 'vvel')
@@ -562,6 +564,8 @@ logical :: io_is_in_append_mode
       latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
 !      yearid = def_var(ncid, 'year', NF_INT, i_dim)
       dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
+      idcntid = def_var(ncid, 'id_cnt', NF_INT, i_dim)
+      idijid = def_var(ncid, 'id_ij', NF_INT, i_dim)
       if (.not. save_short_traj) then
         uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
         vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
@@ -580,6 +584,10 @@ logical :: io_is_in_append_mode
 !      call put_att(ncid, yearid, 'units', 'years')
       call put_att(ncid, dayid, 'long_name', 'year day')
       call put_att(ncid, dayid, 'units', 'days')
+      call put_att(ncid, idcntid, 'long_name', 'counter component of particle id')
+      call put_att(ncid, idcntid, 'units', 'dimensionless')
+      call put_att(ncid, idijid, 'long_name', 'position component of particle id')
+      call put_att(ncid, idijid, 'units', 'dimensionless')
 
       if (.not. save_short_traj) then
         call put_att(ncid, uvelid, 'long_name', 'zonal spped')
@@ -615,6 +623,9 @@ logical :: io_is_in_append_mode
 !      call put_int(ncid, yearid, i, this%year)
       print *,'this%day: ',this%day
       call put_double(ncid, dayid, i, this%day)
+      call split_id(this%id, cnt, ij)
+      call put_int(ncid, idcntid, i, cnt)
+      call put_int(ncid, idijid, i, ij)
       if (.not. save_short_traj) then
         call put_double(ncid, uvelid, i, this%uvel)
         call put_double(ncid, vvelid, i, this%vvel)
