@@ -30,7 +30,7 @@ use diag_manager_mod, only: diag_axis_init
 implicit none ; private
 
 integer :: buffer_width=13 ! size of buffer dimension for comms
-integer :: buffer_width_traj=4  ! LUYU: modify this later. use?
+integer :: buffer_width_traj=11  ! LUYU: modify this later. use?
 logical :: folded_north_on_pe = .false. !< If true, indicates the presence of the tri-polar grid
 logical :: verbose=.false. !< Be verbose to stderr
 logical :: debug=.false. !< Turn on debugging
@@ -79,7 +79,7 @@ public monitor_a_part
 public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
 public check_for_duplicates_in_parallel
-public split_id, id_from_2_ints
+public split_id, id_from_2_ints, generate_id
 
 !> Container for gridded fields
 type :: particles_gridded
@@ -152,9 +152,8 @@ type :: particle
   real :: axn, ayn, bxn, byn                    !< explicit and implicit accelerations (currently disabled)
   real :: start_lon, start_lat, start_day       !< origination position (degrees) and day
   integer :: start_year                         !< origination year
-  integer :: particle_num                       !< a unique particle number
   real :: halo_part  !< equal to zero for particles on the computational domain, and 1 for particles on the halo
-  integer(kind=8) :: id                         !< particle identifier (how does this differ from particle_num? mjh)
+  integer(kind=8) :: id                         !< particle identifier
   integer :: ine, jne                           !< nearest index in NE direction (for convenience)
   real :: xi, yj                                !< non-dimensional coords within current cell (0..1)
   real :: uo, vo                                !< zonal and meridional ocean velocities experienced
@@ -462,8 +461,7 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
     endif
   enddo; enddo
 
-if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
-if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
+  if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
 
 
  ! Parameters
@@ -1503,6 +1501,7 @@ end subroutine increase_ibuffer
   type(buffer), pointer :: buff
   integer, intent(in) :: n
   ! Local variables
+  integer :: cnt, ij
 
     if (.not.associated(buff)) call increase_buffer_traj(buff,delta_buf)
     if (n>buff%size) call increase_buffer_traj(buff,delta_buf)
@@ -1510,13 +1509,15 @@ end subroutine increase_ibuffer
     buff%data(1,n)=traj%lon
     buff%data(2,n)=traj%lat
     buff%data(3,n)=traj%day
-    buff%data(4,n)=traj%uvel
-    buff%data(5,n)=traj%vvel
-    buff%data(6,n)=traj%uvel_old !Alon
-    buff%data(7,n)=traj%vvel_old !Alon
-    buff%data(8,n)=traj%lon_old !Alon
-    buff%data(9,n)=traj%lat_old !Alon
-    buff%data(10,n)=float(traj%particle_num)
+    call split_id(traj%id, cnt, ij)
+    buff%data(4,n)=float(cnt)
+    buff%data(5,n)=float(ij)
+    buff%data(6,n)=traj%uvel
+    buff%data(7,n)=traj%vvel
+    buff%data(8,n)=traj%uvel_old !Alon
+    buff%data(9,n)=traj%vvel_old !Alon
+    buff%data(10,n)=traj%lon_old !Alon
+    buff%data(11,n)=traj%lat_old !Alon
 
   end subroutine pack_traj_into_buffer2
 
@@ -1527,7 +1528,7 @@ end subroutine increase_ibuffer
   integer, intent(in) :: n
  ! Local variables
   type(xyt) :: traj
-  integer :: stderrunit
+  integer :: stderrunit, cnt, ij
   ! Get the stderr unit number
   stderrunit = stderr()
 
@@ -1535,17 +1536,15 @@ end subroutine increase_ibuffer
     traj%lat=buff%data(2,n)
 !    traj%year=nint(buff%data(3,n))
     traj%day=buff%data(3,n)
-    traj%uvel=buff%data(4,n)
-    traj%vvel=buff%data(5,n)
-!    traj%axn=buff%data(9,n) !Alon
-!    traj%ayn=buff%data(10,n) !Alon
-!    traj%bxn=buff%data(11,n) !Alon
-!    traj%byn=buff%data(12,n) !Alon
-    traj%uvel_old=buff%data(6,n) !Alon
-    traj%vvel_old=buff%data(7,n) !Alon
-    traj%lon_old=buff%data(8,n) !Alon
-    traj%lat_old=buff%data(9,n) !Alon
-    traj%particle_num=nint(buff%data(10,n))
+    cnt = nint(buff%data(4,n))
+    ij = nint(buff%data(5,n))
+    traj%id = id_from_2_ints(cnt, ij)
+    traj%uvel=buff%data(6,n)
+    traj%vvel=buff%data(7,n)
+    traj%uvel_old=buff%data(8,n) !Alon
+    traj%vvel_old=buff%data(9,n) !Alon
+    traj%lon_old=buff%data(10,n) !Alon
+    traj%lat_old=buff%data(11,n) !Alon
 
     call append_posn(first, traj)
 
@@ -1689,6 +1688,45 @@ integer :: grdi_inner, grdj_inner
   endif
 
 end subroutine check_for_duplicates
+
+!> Generate an iceberg id from a counter at calving-location and the calving location itself.
+!! Note that this updates grd%iceberg_counter_grd.
+!!
+!! \todo If we initialized grd%iceberg_counter_grd to 0 when the model is first run we could move
+!! this increment line to before the id generation and then the counter would be an actual count.
+integer(kind=8) function generate_id(grd, i, j)
+  type(particles_gridded), pointer    :: grd !< Container for gridded fields
+  integer,                intent(in) :: i   !< i-index of calving location
+  integer,                intent(in) :: j   !< j-index of calving location
+  ! Local variables
+  integer :: ij ! Hash of i,j
+
+  ! Increment counter in calving cell
+  grd%particle_counter_grd(i,j) = grd%particle_counter_grd(i,j) + 1
+  ! ij is unique number for each grid cell (32-bit integers allow for ~1/100th degree global resolution)
+  ij = ij_component_of_id(grd, i, j)
+  ! Generate a 64-bit id
+  generate_id = id_from_2_ints( grd%particle_counter_grd(i,j), ij )
+
+end function generate_id
+
+!> Calculate the location-derived component of a particle id which is a hash of the i,j-indexes for the cell
+integer function ij_component_of_id(grd, i, j)
+  type(particles_gridded), pointer    :: grd !< Container for gridded fields
+  integer,                intent(in) :: i   !< i-index of calving location
+  integer,                intent(in) :: j   !< j-index of calving location
+  ! Local variables
+  integer :: ij ! Hash of i,j
+  integer :: iNg ! Zonal size of the global grid
+
+  ! Using the current grid shape maximizes the numbers of IDs that can be represented
+  ! allowing up to 30-minute uniform global resolution, or potentially finer if non-uniform. 
+  iNg = grd%ieg - grd%isg + 1
+
+  ! ij_component_of_id is unique number for each grid cell (32-bit integers allow for ~1/100th degree global resolution)
+  ij_component_of_id = i + ( iNg * ( j - 1 ) )
+
+end function ij_component_of_id
 
 ! ##############################################################################
 !> Prints a particular part's vitals
@@ -2052,7 +2090,7 @@ integer :: grdi, grdj
       posn%lat=this%lat
       posn%year=parts%current_year
       posn%day=parts%current_yearday
-      !posn%id=this%id
+      posn%id=this%id
       if (.not. parts%save_short_traj) then !Not totally sure that this is correct
         posn%uvel=this%uvel
         posn%vvel=this%vvel
@@ -3165,7 +3203,7 @@ integer function part_chksum(part )
 type(particle), pointer :: part
 ! Local variables
 real :: rtmp(13) !Changed from 28 to 34 by Alon
-integer :: itmp(17), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
+integer :: itmp(18), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
 integer :: i
 
   rtmp(:)=0.
@@ -3191,10 +3229,10 @@ integer :: i
   itmp(14)=part%start_year !Changed from 29 to 37 by Alon
   itmp(15)=part%ine !Changed from 30 to 38 by Alon
   itmp(16)=part%jne !Changed from 31 to 39 by Alon
-  itmp(17)=part%particle_num !added  by Alon
+  call split_id(part%id, itmp(17), itmp(18))
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,17 !Changd from 28 to 37 by Alon
+  do i=1,18 !Changd from 28 to 37 by Alon
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i
