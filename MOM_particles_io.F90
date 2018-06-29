@@ -41,7 +41,7 @@ use MOM_particles_framework, only: verbose, really_debug, debug, restart_input_d
 use MOM_particles_framework, only: ignore_ij_restart, use_slow_find,generate_test_particles!,print_part
 use MOM_particles_framework, only: force_all_pes_traj
 !use particles_framework, only: check_for_duplicates_in_parallel
-use MOM_particles_framework, only: split_id !, id_from_2_ints, generate_id
+use MOM_particles_framework, only: split_id, id_from_2_ints, generate_id
 
 implicit none ; private
 
@@ -142,8 +142,9 @@ real, allocatable, dimension(:) :: lon,          &
 
 integer, allocatable, dimension(:) :: ine,              &
                                       jne,              &
+                                      drifter_num,      &
                                       id_cnt,           &
-!                                      id_ij,            &
+                                      id_ij,            &
 !                                      start_year,       &
                                       first_id_cnt,     &
                                       other_id_cnt,     &
@@ -191,7 +192,7 @@ integer :: grdi, grdj
    allocate(jne(nparts))
 !   allocate(start_year(nparts))
    allocate(id_cnt(nparts))
-!   allocate(id_ij(nparts))
+   allocate(id_ij(nparts))
 
 
   call get_instance_filename("drifters.res.nc", filename)
@@ -224,8 +225,8 @@ integer :: grdi, grdj
 !                                            longname='calendar year of calving event', units='years')
   id = register_restart_field(parts_restart,filename,'id_cnt',id_cnt, &
                                             longname='counter component of particle id', units='dimensionless')
-!  id = register_restart_field(parts_restart,filename,'id_ij',id_ij, &
-!                                            longname='position component of particle id', units='dimensionless')
+  id = register_restart_field(parts_restart,filename,'id_ij',id_ij, &
+                                            longname='position component of particle id', units='dimensionless')
 !  id = register_restart_field(parts_restart,filename,'start_day',start_day, &
 !                                            longname='year day of calving event',units='days')
 
@@ -245,7 +246,8 @@ integer :: grdi, grdj
 !      bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
 !      start_year(i) = this%start_year; start_day(i) = this%start_day
-      id_cnt(i) = this%id !; id_ij(i) = this%id_ij
+      id_cnt(i) = this%id !; id_ij(i) = this%id
+      call split_id(this%id, id_cnt(i), id_ij(i))
       this=>this%next
       print *, lon(i),lat(i),uvel(i),vvel(i),ine(i),&
            jne(i),start_lon(i),start_lat(i),id_cnt(i)
@@ -273,12 +275,20 @@ integer :: grdi, grdj
   deallocate(           &
              ine,       &
              jne,       &
-             id_cnt) !,    &
-!             id_ij,     &
+             id_cnt,    &
+             id_ij) !,     &
 !             start_year )
 
-  call nullify_domain()
+  deallocate(first_id_cnt,          &
+             other_id_cnt,          &
+             first_id_ij,           &
+             other_id_ij,           &
+             first_part_ine,        &
+             first_part_jne,        &
+             other_part_ine,        &
+             other_part_jne )
 
+  call nullify_domain()
 
 end subroutine write_restart
 
@@ -292,7 +302,7 @@ real, dimension(:,:,:) :: u, v
 
 !Local variables
 integer :: k, siz(4), nparts_in_file, nparts_read
-logical :: lres, found_restart, found!, replace_particle_num
+logical :: lres, found_restart, found, replace_drifter_num
 logical :: explain
 logical :: multiPErestart  ! Not needed with new restart read; currently kept for compatibility
 real :: lon0, lon1, lat0, lat1
@@ -305,9 +315,10 @@ integer :: stderrunit, i, j, cnt, ij
 
 real, allocatable,dimension(:) :: lon,	&
                                   lat,	&
-                                  depth, &
+                                  depth,  &
                                   id
-
+integer, allocatable, dimension(:) :: id_cnt, &
+                                      id_ij
   ! Get the stderr unit number
   stderrunit=stderr()
 
@@ -356,10 +367,16 @@ real, allocatable,dimension(:) :: lon,	&
 
     print *,'restart size= ',siz
     nparts_in_file = siz(1)
+    replace_drifter_num = field_exist(filename, 'drifter_num') ! True if using a 32-bit drifter_num in restart file
     allocate(lon(nparts_in_file))
     allocate(lat(nparts_in_file))
     allocate(depth(nparts_in_file))
-    allocate(id(nparts_in_file))
+    if (replace_drifter_num) then
+      allocate(id(nparts_in_file))
+    else
+      allocate(id_cnt(nparts_in_file))
+      allocate(id_ij(nparts_in_file))
+    endif
 
     print *,'reading lon'
     call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
@@ -368,7 +385,13 @@ real, allocatable,dimension(:) :: lon,	&
     print *,'reading depth'
     call read_unlimited_axis(filename,'depth',depth,domain=grd%domain)
     print *,'reading drifter num'
-    call read_unlimited_axis(filename,'drifter_num',id,domain=grd%domain)
+    if (replace_drifter_num) then
+      print *,'using drifter_num instead of IDs'
+      call read_unlimited_axis(filename,'drifter_num',id,domain=grd%domain)
+    else
+      call read_int_vector(filename, 'id_cnt', id_cnt, grd%domain)
+      call read_int_vector(filename, 'id_ij', id_ij, grd%domain)
+    endif
   end if ! found_restart ln 569
 
   ! Find approx outer bounds for tile
@@ -397,6 +420,12 @@ real, allocatable,dimension(:) :: lon,	&
 
     print *,'calling pos_within_cell'
     if (lres) then ! True if the particle resides on the current processors computational grid
+      if (replace_drifter_num) then
+        localpart%id = generate_id(grd, localpart%ine, localpart%jne)
+        print *, 'id = ', localpart%id
+      else
+        localpart%id = id_from_2_ints(id_cnt(k), id_ij(k))
+      endif
       lres=pos_within_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne, localpart%xi, localpart%yj)
       !call interp_flds(grd,localpart%ine,localpart%jne,localpart%xi,localpart%yj,localpart%uvel, localpart%vvel) !LUYU: we need to move this to evolve_parts.
       call add_new_part_to_list(parts%list(localpart%ine,localpart%jne)%first, localpart)
@@ -406,13 +435,33 @@ real, allocatable,dimension(:) :: lon,	&
   if (found_restart) then
     deallocate(lon,          &
                lat,          &
-               depth,        &
-               id )
-  end if
+               depth)
+    if (replace_drifter_num) then
+      deallocate(id)
+    else
+      deallocate(id_cnt)
+      deallocate(id_ij)
+    endif
+  endif
 
   print *,'leaving read_restart_parts'
 
 end subroutine read_restart_parts
+
+!> Read a vector of integers from file and use a default value if variable is missing
+subroutine read_int_vector(filename, varname, values, domain, value_if_not_in_file)
+  character(len=*),  intent(in)  :: filename !< Name of file to read from
+  character(len=*),  intent(in)  :: varname !< Name of variable to read
+  integer,           intent(out) :: values(:) !< Returned vector of integers
+  type(domain2D),    intent(in)  :: domain !< Parallel decomposition
+  integer, optional, intent(in)  :: value_if_not_in_file !< Value to use if variable is not in file
+
+  if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
+    values(:)=value_if_not_in_file
+  else
+    call read_unlimited_axis(filename,varname,values,domain=domain)
+  endif
+end subroutine read_int_vector
 
 ! ##############################################################################
 !> Write a trajectory-based diagnostics file
