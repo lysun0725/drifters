@@ -40,7 +40,7 @@ use MOM_particles_framework, only: buffer_width, buffer_width_traj
 use MOM_particles_framework, only: verbose, really_debug, debug, restart_input_dir
 use MOM_particles_framework, only: ignore_ij_restart, use_slow_find,generate_test_particles!,print_part
 use MOM_particles_framework, only: force_all_pes_traj
-!use particles_framework, only: check_for_duplicates_in_parallel
+use MOM_particles_framework, only: check_for_duplicates_in_parallel
 use MOM_particles_framework, only: split_id, id_from_2_ints, generate_id
 
 implicit none ; private
@@ -230,8 +230,6 @@ integer :: grdi, grdj
 !  id = register_restart_field(parts_restart,filename,'start_day',start_day, &
 !                                            longname='year day of calving event',units='days')
 
-
-  print *,'in write_restart: done registering restart fields'
   ! Write variables
 
   i = 0
@@ -249,8 +247,6 @@ integer :: grdi, grdj
       id_cnt(i) = this%id !; id_ij(i) = this%id
       call split_id(this%id, id_cnt(i), id_ij(i))
       this=>this%next
-      print *, lon(i),lat(i),uvel(i),vvel(i),ine(i),&
-           jne(i),start_lon(i),start_lat(i),id_cnt(i)
     enddo
   enddo ; enddo
 
@@ -327,16 +323,11 @@ integer, allocatable, dimension(:) :: id_cnt, &
 
   if (.not. associated(grd)) print *,'parts%grd not associated!'
 
-  print *,'in read_restart_parts'
-  print *,grd%isd,grd%ied,grd%jsd,grd%jed
-
   if (associated(grd%uo)) deallocate(grd%uo)
   if (associated(grd%vo)) deallocate(grd%vo)
 
   allocate(grd%uo(grd%isd:grd%ied,grd%jsd:grd%jed))
   allocate(grd%vo(grd%isd:grd%ied,grd%jsd:grd%jed))
-
-  print *,'in read_restart_parts (2)'
 
   do j=grd%jsd,grd%jed
     do i=grd%isd,grd%ied
@@ -350,8 +341,6 @@ integer, allocatable, dimension(:) :: id_cnt, &
     enddo
   enddo
 
-  print *,'in read_restart_parts (3)'
-
   ! Zero out nparts_in_file
   nparts_in_file = 0
 
@@ -360,12 +349,9 @@ integer, allocatable, dimension(:) :: id_cnt, &
   found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
 
   if (found_restart) then
-    print *,'Found restart'
-
     filename = filename_base
     call get_field_size(filename,'i',siz, field_found=found, domain=grd%domain)
 
-    print *,'restart size= ',siz
     nparts_in_file = siz(1)
     replace_drifter_num = field_exist(filename, 'drifter_num') ! True if using a 32-bit drifter_num in restart file
     allocate(lon(nparts_in_file))
@@ -378,15 +364,10 @@ integer, allocatable, dimension(:) :: id_cnt, &
       allocate(id_ij(nparts_in_file))
     endif
 
-    print *,'reading lon'
     call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
-    print *,'reading lat'
     call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
-    print *,'reading depth'
     call read_unlimited_axis(filename,'depth',depth,domain=grd%domain)
-    print *,'reading drifter num'
     if (replace_drifter_num) then
-      print *,'using drifter_num instead of IDs'
       call read_unlimited_axis(filename,'drifter_num',id,domain=grd%domain)
     else
       call read_int_vector(filename, 'id_cnt', id_cnt, grd%domain)
@@ -404,8 +385,6 @@ integer, allocatable, dimension(:) :: id_cnt, &
     localpart%lon=lon(k)
     localpart%lat=lat(k)
 
-    print *,'calling find_cell'
-
     if (use_slow_find) then
       lres=find_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne)
     else
@@ -418,11 +397,9 @@ integer, allocatable, dimension(:) :: id_cnt, &
       write(stderrunit,*) 'particles, read_restart_parts: lres = ',lres
     endif
 
-    print *,'calling pos_within_cell'
     if (lres) then ! True if the particle resides on the current processors computational grid
       if (replace_drifter_num) then
         localpart%id = generate_id(grd, localpart%ine, localpart%jne)
-        print *, 'id = ', localpart%id
       else
         localpart%id = id_from_2_ints(id_cnt(k), id_ij(k))
       endif
@@ -444,7 +421,7 @@ integer, allocatable, dimension(:) :: id_cnt, &
     endif
   endif
 
-  print *,'leaving read_restart_parts'
+  call check_for_duplicates_in_parallel(parts)
 
 end subroutine read_restart_parts
 
@@ -495,7 +472,6 @@ logical :: io_is_in_append_mode
   !Assemble the list of trajectories from all pes in this I/O tile
   call mpp_clock_begin(clock_trp)
 
-  print *,'in write_traj: 0001'
   !First add the trajs on the io_tile_root_pe (if any) to the I/O list
   if(is_io_tile_root_pe .OR. force_all_pes_traj ) then
      if(associated(trajectory)) then
@@ -513,7 +489,6 @@ logical :: io_is_in_append_mode
   !Now gather and append the parts from all pes in the io_tile to the list on corresponding io_tile_root_pe
   ntrajs_sent_io =0
   ntrajs_rcvd_io =0
-  print *,'in write_traj: 0002'
   if(is_io_tile_root_pe) then
      !Receive trajs from all pes in this I/O tile !FRAGILE!SCARY!
      do np=2,size(io_tile_pelist) ! Note: np starts from 2 to exclude self
@@ -546,7 +521,6 @@ logical :: io_is_in_append_mode
 
   endif !.NOT. force_all_pes_traj
 
-  print *,'in write_traj: 0003'
   call mpp_clock_end(clock_trp)
 
   !Now start writing in the io_tile_root_pe if there are any parts in the I/O list
@@ -570,7 +544,6 @@ logical :: io_is_in_append_mode
           write(filename,'(A,".",I6.6)') trim(filename), mpp_pe()
        endif
     endif
-  print *,'in write_traj: creating traj file'
     io_is_in_append_mode = .false.
     iret = nf_create(filename, NF_NOCLOBBER, ncid)
     if (iret .ne. NF_NOERR) then
@@ -587,7 +560,6 @@ logical :: io_is_in_append_mode
     endif
 
     if (io_is_in_append_mode) then
-        print *,'in write_traj: appending traj'
       iret = nf_inq_dimid(ncid, 'i', i_dim)
       if (iret .ne. NF_NOERR) write(stderrunit,*) 'particles, write_trajectory: nf_inq_dimid i failed'
       lonid = inq_varid(ncid, 'lon')
@@ -603,7 +575,6 @@ logical :: io_is_in_append_mode
 !        void = inq_varid(ncid, 'vo')
       endif
     else
-        print *,'in write_traj: ncdef'
       ! Dimensions
       iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
       if (iret .ne. NF_NOERR) write(stderrunit,*) 'particles, write_trajectory: nf_def_dim i failed'
@@ -621,7 +592,6 @@ logical :: io_is_in_append_mode
 !        uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
 !        void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
       endif
-
       ! Attributes
       iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, 0)
       iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 1, 1)
@@ -637,6 +607,7 @@ logical :: io_is_in_append_mode
       call put_att(ncid, idcntid, 'units', 'dimensionless')
       call put_att(ncid, idijid, 'long_name', 'position component of particle id')
       call put_att(ncid, idijid, 'units', 'dimensionless')
+!      call put_att(ncid, partnumid, 'units', 'dimensionless')
 
       if (.not. save_short_traj) then
         call put_att(ncid, uvelid, 'long_name', 'zonal spped')
@@ -653,7 +624,6 @@ logical :: io_is_in_append_mode
     ! End define mode
     iret = nf_enddef(ncid)
 
-      print *,'in write_traj: nf_enddef'
     ! Write variables
     this=>traj4io
     if (io_is_in_append_mode) then
@@ -664,13 +634,10 @@ logical :: io_is_in_append_mode
     endif
     do while (associated(this))
       i=i+1
-      print *,'this%lon: ',this%lon
       call put_double(ncid, lonid, i, this%lon)
-      print *,'this%lat: ',this%lat
       call put_double(ncid, latid, i, this%lat)
 !      print *,'this%year: ',this%year
 !      call put_int(ncid, yearid, i, this%year)
-      print *,'this%day: ',this%day
       call put_double(ncid, dayid, i, this%day)
       call split_id(this%id, cnt, ij)
       call put_int(ncid, idcntid, i, cnt)

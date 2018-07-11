@@ -85,12 +85,9 @@ subroutine particles_init(parts, Grid, Time, dt, u, v)
  gnj = Grid%jeg - Grid%jsg + 1
 
  call particles_framework_init(parts, Grid, Time, dt)
- print *,'done particles_framework_init'
  call mpp_clock_begin(parts%clock_ior)
  call particles_io_init(parts,Grid%Domain%io_layout)
- print *,'done particles_io_init'
  call read_restart_parts(parts,Time, u, v)
- print *,'done read_restart_parts'
 ! call parts_chksum(parts, 'read_restart_particles')
  call mpp_clock_end(parts%clock_ior)
 
@@ -242,12 +239,12 @@ subroutine particles_run(parts, time, uo, vo, stagger)
   sample_traj=.false.
   if ( (parts%traj_sample_hrs>0)  .and. (.not. parts%ignore_traj) ) then
     if (mod(60*60*24*iday+ 60*60*ihr + 60*imin + isec ,60*60*parts%traj_sample_hrs).eq.0) &
-        sample_traj=.true.
+      sample_traj=.true.
   endif
   write_traj=.false.
   if ((parts%traj_write_hrs>0) .and. (.not. parts%ignore_traj))  then
-     if (mod(60*60*24*iday+ 60*60*ihr + 60*imin + isec ,60*60*parts%traj_write_hrs).eq.0) &
-         write_traj=.true.
+    if (mod(60*60*24*(iday-1)+ 60*60*ihr + 60*imin + isec, 60*60*parts%traj_write_hrs).eq.0) &
+      write_traj=.true.
   endif
   lverbose=.false.
   if (parts%verbose_hrs>0) then
@@ -260,14 +257,10 @@ subroutine particles_run(parts, time, uo, vo, stagger)
 
  !call sanitize_field(grd%calving,1.e20)
 
-  print *,'in particles_run: 0001'
-
  ! Straight copy of ocean velocities
   grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec) = uo(grd%isc:grd%iec,grd%jsc:grd%jec)
   grd%vo(grd%isc:grd%iec,grd%jsc:grd%jec) = vo(grd%isc:grd%iec,grd%jsc:grd%jec)
   call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=CGRID_NE)
-
-  print *,'in particles_run: 0002'
 
   ! Make sure that gridded values agree with mask  (to get ride of NaN values)
   do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
@@ -282,35 +275,26 @@ subroutine particles_run(parts, time, uo, vo, stagger)
   if (debug) call parts_chksum(parts, 'run parts (top)')
   if (debug) call checksum_gridded(parts%grd, 'top of s/r run')
 
-  print *,'in particles_run: 0003'
   call evolve_particles(parts)
   if (parts%debug_particle_with_id>0) call monitor_a_part(parts, 'particles_run, after evolve()     ')
-  print *,'in particles_run: 0004'
   call move_part_between_cells(parts)  !Markpoint6
   if (parts%debug_particle_with_id>0) call monitor_a_part(parts, 'particles_run, after move_lists() ')
   if (debug) call parts_chksum(parts, 'run parts (evolved)',ignore_halo_violation=.true.)
   if (debug) call checksum_gridded(parts%grd, 's/r run after evolve')
-  print *,'in particles_run: 0005'
   call send_parts_to_other_pes(parts)
   if (parts%debug_particle_with_id>0) call monitor_a_part(parts, 'particles_run, after send_parts() ')
 
   ! For each part, record
   sample_traj = .true.
   if (sample_traj) call record_posn(parts)
-  write_traj = .true.
   if (write_traj) then
-    print *,'in particles_run: 0006'
     call move_all_trajectories(parts)
-      print *,'in particles_run: 0007'
     call write_trajectory(parts%trajectories, parts%save_short_traj)
   endif
 
-  print *,'in particles_run: 0008'
   ! Dump particles to screen
   if (really_debug) call print_parts(stderrunit,parts,'particles_run, status')
-  print *,'in particles_run: 0009'
   if (debug) call parts_chksum(parts, 'run parts (bot)')
-  print *,'leaving particles_run'
 end subroutine particles_run
 
 
