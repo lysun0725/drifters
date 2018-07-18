@@ -97,6 +97,8 @@ type :: particles_gridded
   integer :: ieg !< End i-index of global domain
   integer :: jsg !< Start j-index of global domain
   integer :: jeg !< End j-index of global domain
+  integer :: is_offset=0 !< add to i to recover global i-index
+  integer :: js_offset=0 !< add to j to recover global j-index
   integer :: my_pe !< MPI PE index
   integer :: pe_N !< MPI PE index of PE to the north
   integer :: pe_S !< MPI PE index of PE to the south
@@ -313,6 +315,8 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
   grd%jsc = Grid%jsc; grd%jec = Grid%jec
   grd%isd = Grid%isd; grd%ied = Grid%ied
   grd%jsd = Grid%jsd; grd%jed = Grid%jed
+  grd%is_offset = Grid%idg_offset
+  grd%js_offset = Grid%jdg_offset
 
   call mpp_get_neighbor_pe(grd%domain, NORTH, grd%pe_N)
   call mpp_get_neighbor_pe(grd%domain, SOUTH, grd%pe_S)
@@ -1718,13 +1722,18 @@ integer function ij_component_of_id(grd, i, j)
   ! Local variables
   integer :: ij ! Hash of i,j
   integer :: iNg ! Zonal size of the global grid
+  integer :: ig ! Global i-index
+  integer :: jg ! Global j-index
 
   ! Using the current grid shape maximizes the numbers of IDs that can be represented
   ! allowing up to 30-minute uniform global resolution, or potentially finer if non-uniform. 
   iNg = grd%ieg - grd%isg + 1
 
+  ig = i + grd%is_offset ! Calculate global i-index
+  jg = j + grd%js_offset ! Calculate global j-index
+
   ! ij_component_of_id is unique number for each grid cell (32-bit integers allow for ~1/100th degree global resolution)
-  ij_component_of_id = i + ( iNg * ( j - 1 ) )
+  ij_component_of_id = ig + ( iNg * ( jg - 1 ) )
 
 end function ij_component_of_id
 
