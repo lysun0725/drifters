@@ -193,6 +193,7 @@ integer :: grdi, grdj
    allocate(ine(nparts))
    allocate(jne(nparts))
 !   allocate(start_year(nparts))
+   allocate(drifter_num(nparts))
    allocate(id_cnt(nparts))
    allocate(id_ij(nparts))
 
@@ -226,6 +227,8 @@ integer :: grdi, grdj
                                             longname='latitude of starting location',units='degrees_N')
 !  id = register_restart_field(parts_restart,filename,'start_year',start_year, &
 !                                            longname='calendar year of calving event', units='years')
+  id = register_restart_field(parts_restart,filename,'drifter_num',drifter_num, &
+                                            longname='identification of the drifter', units='dimensionless')
   id = register_restart_field(parts_restart,filename,'id_cnt',id_cnt, &
                                             longname='counter component of particle id', units='dimensionless')
   id = register_restart_field(parts_restart,filename,'id_ij',id_ij, &
@@ -247,7 +250,7 @@ integer :: grdi, grdj
 !      bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
 !      start_year(i) = this%start_year; start_day(i) = this%start_day
-      id_cnt(i) = this%id !; id_ij(i) = this%id
+      id_cnt(i) = this%id; drifter_num(i) = this%id !; id_ij(i) = this%id
       call split_id(this%id, id_cnt(i), id_ij(i))
       this=>this%next
     enddo
@@ -260,6 +263,7 @@ integer :: grdi, grdj
   deallocate(              &
              lon,          &
              lat,          &
+             depth,        &
              uvel,         &
              vvel,         &
 !             axn,          &
@@ -274,6 +278,7 @@ integer :: grdi, grdj
   deallocate(           &
              ine,       &
              jne,       &
+             drifter_num,       &
              id_cnt,    &
              id_ij) !,     &
 !             start_year )
