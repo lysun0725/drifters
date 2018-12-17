@@ -128,6 +128,7 @@ logical :: check_bond_quality
 type(particles_gridded), pointer :: grd
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
+                                   depth,        &
                                    uvel,         &
                                    vvel,         &
 !                                   axn,          &
@@ -177,6 +178,7 @@ integer :: grdi, grdj
 
    allocate(lon(nparts))
    allocate(lat(nparts))
+   allocate(depth(nparts))
    allocate(uvel(nparts))
    allocate(vvel(nparts))
  !  allocate(axn(nparts))    !Alon
@@ -207,6 +209,7 @@ integer :: grdi, grdj
   ! Define Variables
   id = register_restart_field(parts_restart,filename,'lon',lon,longname='longitude',units='degrees_E')
   id = register_restart_field(parts_restart,filename,'lat',lat,longname='latitude',units='degrees_N')
+  id = register_restart_field(parts_restart,filename,'depth',depth,longname='depth below surface',units='m')
   id = register_restart_field(parts_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
   id = register_restart_field(parts_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
 !  if (.not. parts%Runge_not_Verlet) then
@@ -237,7 +240,7 @@ integer :: grdi, grdj
     this=>parts%list(grdi,grdj)%first
     do while(associated(this))
       i = i + 1
-      lon(i) = this%lon; lat(i) = this%lat
+      lon(i) = this%lon; lat(i) = this%lat; depth(i) = this%depth
       uvel(i) = this%uvel; vvel(i) = this%vvel
       ine(i) = this%ine; jne(i) = this%jne
 !      axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
@@ -384,6 +387,9 @@ integer, allocatable, dimension(:) :: id_cnt, &
   do k=1, nparts_in_file
     localpart%lon=lon(k)
     localpart%lat=lat(k)
+    localpart%start_lon=lon(k)
+    localpart%start_lat=lat(k)
+    localpart%depth=depth(k)
 
     if (use_slow_find) then
       lres=find_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne)

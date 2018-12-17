@@ -147,7 +147,7 @@ end type xyt
 type :: particle
   type(particle), pointer :: prev=>null(), next=>null()
   ! State variables (specific to the particle, needed for restarts)
-  real :: lon, lat, uvel, vvel !< position (degrees) and zonal and meridional velocities (m/s)
+  real :: lon, lat, depth, uvel, vvel !< position (degrees) and zonal and meridional velocities (m/s)
   real :: lon_old, lat_old, uvel_old, vvel_old  !< previous position (degrees) and zonal
                                                 !< and meridional velocities (m/s)
   real :: axn, ayn, bxn, byn                    !< explicit and implicit accelerations (currently disabled)
