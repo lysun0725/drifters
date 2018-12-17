@@ -338,6 +338,7 @@ integer, allocatable, dimension(:) :: id_cnt, &
   allocate(grd%uo(grd%isd:grd%ied,grd%jsd:grd%jed))
   allocate(grd%vo(grd%isd:grd%ied,grd%jsd:grd%jed))
 
+  !LUYU: uo and vo are intialized in terms of CGRID; will convert this to BGRID in particles_run
   do j=grd%jsd,grd%jed
     do i=grd%isd,grd%ied
        grd%uo(i,j) = u(i,j,1)

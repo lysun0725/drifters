@@ -217,7 +217,8 @@ subroutine particles_run(parts, time, uo, vo, stagger)
   ! Get the stderr unit number
   stderrunit = stderr()
 
-  vel_stagger = CGRID_NE ; if (present(stagger)) vel_stagger = stagger
+  ! vel_stagger = CGRID_NE ; if (present(stagger)) vel_stagger = stagger
+  vel_stagger = BGRID_NE ; if (present(stagger)) vel_stagger = stagger
 
   ! For convenience
   grd=>parts%grd
@@ -254,9 +255,13 @@ subroutine particles_run(parts, time, uo, vo, stagger)
  !call sanitize_field(grd%calving,1.e20)
 
  ! Straight copy of ocean velocities
-  grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec) = uo(grd%isc:grd%iec,grd%jsc:grd%jec)
-  grd%vo(grd%isc:grd%iec,grd%jsc:grd%jec) = vo(grd%isc:grd%iec,grd%jsc:grd%jec)
-  call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=CGRID_NE)
+ ! grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec) = uo(grd%isc:grd%iec,grd%jsc:grd%jec)
+ ! grd%vo(grd%isc:grd%iec,grd%jsc:grd%jec) = vo(grd%isc:grd%iec,grd%jsc:grd%jec)
+ ! LUYU: convert CGRID to BGRID.
+  grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec) = 0.5*(uo(grd%isc:grd%iec,grd%jsc:grd%jec)+uo(grd%isc:grd%iec,grd%jsc+1:grd%jec+1))
+  grd%vo(grd%isc:grd%iec,grd%jsc:grd%jec) = 0.5*(vo(grd%isc:grd%iec,grd%jsc:grd%jec)+vo(grd%isc+1:grd%iec+1,grd%jsc:grd%jec))
+ ! call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=CGRID_NE)
+  call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
 
   ! Make sure that gridded values agree with mask  (to get ride of NaN values)
   do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
