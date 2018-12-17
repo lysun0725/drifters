@@ -250,7 +250,7 @@ integer :: grdi, grdj
 !      bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
 !      start_year(i) = this%start_year; start_day(i) = this%start_day
-      id_cnt(i) = this%id; drifter_num(i) = this%id !; id_ij(i) = this%id
+      id_cnt(i) = this%id; drifter_num(i) = this%drifter_num !; id_ij(i) = this%id
       call split_id(this%id, id_cnt(i), id_ij(i))
       this=>this%next
     enddo
@@ -320,6 +320,7 @@ integer :: stderrunit, i, j, cnt, ij
 real, allocatable,dimension(:) :: lon,	&
                                   lat,	&
                                   depth,  &
+                                  drifter_num,  &
                                   id
 integer, allocatable, dimension(:) :: id_cnt, &
                                       id_ij
@@ -367,6 +368,7 @@ integer, allocatable, dimension(:) :: id_cnt, &
     allocate(depth(nparts_in_file))
     if (replace_drifter_num) then
       allocate(id(nparts_in_file))
+      allocate(drifter_num(nparts_in_file))
     else
       allocate(id_cnt(nparts_in_file))
       allocate(id_ij(nparts_in_file))
@@ -377,6 +379,7 @@ integer, allocatable, dimension(:) :: id_cnt, &
     call read_unlimited_axis(filename,'depth',depth,domain=grd%domain)
     if (replace_drifter_num) then
       call read_unlimited_axis(filename,'drifter_num',id,domain=grd%domain)
+      call read_unlimited_axis(filename,'drifter_num',drifter_num,domain=grd%domain)
     else
       call read_int_vector(filename, 'id_cnt', id_cnt, grd%domain)
       call read_int_vector(filename, 'id_ij', id_ij, grd%domain)
@@ -411,6 +414,7 @@ integer, allocatable, dimension(:) :: id_cnt, &
     if (lres) then ! True if the particle resides on the current processors computational grid
       if (replace_drifter_num) then
         localpart%id = generate_id(grd, localpart%ine, localpart%jne)
+        localpart%drifter_num = drifter_num(k)
       else
         localpart%id = id_from_2_ints(id_cnt(k), id_ij(k))
       endif
@@ -426,6 +430,7 @@ integer, allocatable, dimension(:) :: id_cnt, &
                depth)
     if (replace_drifter_num) then
       deallocate(id)
+      deallocate(drifter_num)
     else
       deallocate(id_cnt)
       deallocate(id_ij)

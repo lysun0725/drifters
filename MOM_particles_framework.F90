@@ -154,7 +154,7 @@ type :: particle
   real :: start_lon, start_lat, start_day       !< origination position (degrees) and day
   integer :: start_year                         !< origination year
   real :: halo_part  !< equal to zero for particles on the computational domain, and 1 for particles on the halo
-  integer(kind=8) :: id                         !< particle identifier
+  integer(kind=8) :: id,drifter_num             !< particle identifier
   integer :: ine, jne                           !< nearest index in NE direction (for convenience)
   real :: xi, yj                                !< non-dimensional coords within current cell (0..1)
   real :: uo, vo                                !< zonal and meridional ocean velocities experienced
