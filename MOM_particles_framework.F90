@@ -356,8 +356,8 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
   allocate( grd%particle_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%particle_counter_grd(:,:)=0
 
 
-  !is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
-  is=grd%isd; ie=grd%ied; js=grd%jsd; je=grd%jed
+  is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
+  !is=grd%isd; ie=grd%ied; js=grd%jsd; je=grd%jed
   grd%lon(is:ie,js:je)=Grid%geolonBu(is:ie,js:je)
   grd%lat(is:ie,js:je)=Grid%geolatBu(is:ie,js:je)
   grd%area(is:ie,js:je)=Grid%areaT(is:ie,js:je) !sis2 has *(4.*pi*radius*radius)
@@ -443,6 +443,9 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
     enddo; enddo
   endif
 
+  is=grd%isd; ie=grd%ied; js=grd%jsd; je=grd%jed
+  grd%lon(is:ie,js:je)=Grid%geolonBu(is:ie,js:je)
+  grd%lat(is:ie,js:je)=Grid%geolatBu(is:ie,js:je)
 
   ! WE SHOULD JUST COPY geolonC,geolatC instead (MJH)
   ! lonc, latc used for searches
