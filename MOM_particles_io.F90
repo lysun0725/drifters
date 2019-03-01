@@ -396,8 +396,6 @@ integer, allocatable, dimension(:) :: id_cnt, &
   do k=1, nparts_in_file
     localpart%lon=lon(k)
     localpart%lat=lat(k)
-    localpart%start_lon=lon(k)
-    localpart%start_lat=lat(k)
     localpart%depth=depth(k)
 
     if (use_slow_find) then
@@ -413,12 +411,15 @@ integer, allocatable, dimension(:) :: id_cnt, &
     endif
 
     if (lres) then ! True if the particle resides on the current processors computational grid
+      localpart%start_lon=lon(k)
+      localpart%start_lat=lat(k)
       if (replace_drifter_num) then
         localpart%id = generate_id(grd, localpart%ine, localpart%jne)
         localpart%drifter_num = drifter_num(k)
       else
         localpart%id = id_from_2_ints(id_cnt(k), id_ij(k))
       endif
+      localpart%halo_part=0.
       lres=pos_within_cell(grd, localpart%lon, localpart%lat, localpart%ine, localpart%jne, localpart%xi, localpart%yj)
       !call interp_flds(grd,localpart%ine,localpart%jne,localpart%xi,localpart%yj,localpart%uvel, localpart%vvel) !LUYU: we need to move this to evolve_parts.
       call add_new_part_to_list(parts%list(localpart%ine,localpart%jne)%first, localpart)
@@ -465,7 +466,7 @@ type(xyt), pointer :: trajectory !< An particle trajectory
 logical, intent(in) :: save_short_traj !< If true, record less data
 ! Local variables
 integer :: iret, ncid, i_dim, i
-integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
+integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid, drnumid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid
 integer :: mid, did, wid, lid, mbid, hdid
@@ -583,6 +584,7 @@ logical :: io_is_in_append_mode
       latid = inq_varid(ncid, 'lat')
 !      yearid = inq_varid(ncid, 'year')
       dayid = inq_varid(ncid, 'day')
+      drnumid = inq_varid(ncid, 'drifter_num')
       idcntid = inq_varid(ncid, 'id_cnt')
       idijid = inq_varid(ncid, 'id_ij')
       if (.not.save_short_traj) then
@@ -601,6 +603,7 @@ logical :: io_is_in_append_mode
       latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
 !      yearid = def_var(ncid, 'year', NF_INT, i_dim)
       dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
+      drnumid = def_var(ncid, 'drifter_num', NF_INT, i_dim)
       idcntid = def_var(ncid, 'id_cnt', NF_INT, i_dim)
       idijid = def_var(ncid, 'id_ij', NF_INT, i_dim)
       if (.not. save_short_traj) then
@@ -620,6 +623,8 @@ logical :: io_is_in_append_mode
 !      call put_att(ncid, yearid, 'units', 'years')
       call put_att(ncid, dayid, 'long_name', 'year day')
       call put_att(ncid, dayid, 'units', 'days')
+      call put_att(ncid, drnumid, 'long_name', 'identification of the drifter')
+      call put_att(ncid, drnumid, 'units', 'dimensionless')
       call put_att(ncid, idcntid, 'long_name', 'counter component of particle id')
       call put_att(ncid, idcntid, 'units', 'dimensionless')
       call put_att(ncid, idijid, 'long_name', 'position component of particle id')
@@ -656,6 +661,7 @@ logical :: io_is_in_append_mode
 !      print *,'this%year: ',this%year
 !      call put_int(ncid, yearid, i, this%year)
       call put_double(ncid, dayid, i, this%day)
+      call put_int(ncid, drnumid, i, this%particle_num)
       call split_id(this%id, cnt, ij)
       call put_int(ncid, idcntid, i, cnt)
       call put_int(ncid, idijid, i, ij)

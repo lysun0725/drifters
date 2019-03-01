@@ -29,8 +29,8 @@ use diag_manager_mod, only: diag_axis_init
 
 implicit none ; private
 
-integer :: buffer_width=13 ! size of buffer dimension for comms
-integer :: buffer_width_traj=11  ! LUYU: modify this later. use?
+integer :: buffer_width=16 ! size of buffer dimension for comms
+integer :: buffer_width_traj=12  
 logical :: folded_north_on_pe = .false. !< If true, indicates the presence of the tri-polar grid
 logical :: verbose=.false. !< Be verbose to stderr
 logical :: debug=.false. !< Turn on debugging
@@ -240,7 +240,7 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
   ! Namelist parameters (and defaults)
   integer :: halo=4 ! Width of halo region
   integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
-  integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
+  integer :: traj_write_hrs=24 ! Period between writing sampled trajectories to disk
   integer :: verbose_hrs=24 ! Period between verbose messages
   real :: Lx=360. ! Length of domain in x direction, used for periodicity (use a huge number for non-periodic)
   logical :: Runge_not_Verlet=.True. ! True=Runge Kutta, False=Verlet.
@@ -1277,6 +1277,7 @@ integer :: counter, k, max_bonds, id_cnt, id_ij
   counter = 0
   call push_buffer_value(buff%data(:,n), counter, part%lon)
   call push_buffer_value(buff%data(:,n), counter, part%lat)
+  call push_buffer_value(buff%data(:,n), counter, part%depth)
   call push_buffer_value(buff%data(:,n), counter, part%uvel)
   call push_buffer_value(buff%data(:,n), counter, part%vvel)
   call push_buffer_value(buff%data(:,n), counter, part%xi)
@@ -1285,6 +1286,8 @@ integer :: counter, k, max_bonds, id_cnt, id_ij
   call push_buffer_value(buff%data(:,n), counter, part%start_lat)
   call push_buffer_value(buff%data(:,n), counter, part%start_year)
   call push_buffer_value(buff%data(:,n), counter, part%start_day)
+  call push_buffer_value(buff%data(:,n), counter, INT(part%id))
+  call push_buffer_value(buff%data(:,n), counter, INT(part%drifter_num))
   call push_buffer_value(buff%data(:,n), counter, part%ine)
   call push_buffer_value(buff%data(:,n), counter, part%jne)
 !  call push_buffer_value(buff%data(:,n), counter, part%axn)
@@ -1387,7 +1390,7 @@ logical :: lres
 type(particle) :: localpart
 type(particle), pointer :: this
 integer :: other_part_ine, other_part_jne
-integer :: counter, k, max_bonds, id_cnt, id_ij
+integer :: counter, k, max_bonds, id_cnt, id_ij,tmp
 integer(kind=8) :: id
 integer :: stderrunit
 logical :: force_app
@@ -1405,6 +1408,7 @@ logical :: quick
   counter = 0
   call pull_buffer_value(buff%data(:,n), counter, localpart%lon)
   call pull_buffer_value(buff%data(:,n), counter, localpart%lat)
+  call pull_buffer_value(buff%data(:,n), counter, localpart%depth)
   call pull_buffer_value(buff%data(:,n), counter, localpart%uvel)
   call pull_buffer_value(buff%data(:,n), counter, localpart%vvel)
   call pull_buffer_value(buff%data(:,n), counter, localpart%xi)
@@ -1413,6 +1417,10 @@ logical :: quick
   call pull_buffer_value(buff%data(:,n), counter, localpart%start_lat)
   call pull_buffer_value(buff%data(:,n), counter, localpart%start_year)
   call pull_buffer_value(buff%data(:,n), counter, localpart%start_day)
+  call pull_buffer_value(buff%data(:,n), counter, tmp)
+  localpart%id=INT(tmp,kind=8)
+  call pull_buffer_value(buff%data(:,n), counter, tmp)
+  localpart%drifter_num=INT(tmp,kind=8)
   call pull_buffer_value(buff%data(:,n), counter, localpart%ine)
   call pull_buffer_value(buff%data(:,n), counter, localpart%jne)
 !  call pull_buffer_value(buff%data(:,n), counter, localpart%axn)
@@ -1592,6 +1600,7 @@ end subroutine increase_ibuffer
     buff%data(9,n)=traj%vvel_old !Alon
     buff%data(10,n)=traj%lon_old !Alon
     buff%data(11,n)=traj%lat_old !Alon
+    buff%data(12,n)=traj%particle_num !Alon
 
   end subroutine pack_traj_into_buffer2
 
@@ -1619,6 +1628,7 @@ end subroutine increase_ibuffer
     traj%vvel_old=buff%data(9,n) !Alon
     traj%lon_old=buff%data(10,n) !Alon
     traj%lat_old=buff%data(11,n) !Alon
+    traj%particle_num=buff%data(12,n) 
 
     call append_posn(first, traj)
 
@@ -2170,6 +2180,7 @@ integer :: grdi, grdj
       posn%year=parts%current_year
       posn%day=parts%current_yearday
       posn%id=this%id
+      posn%particle_num=this%drifter_num
       if (.not. parts%save_short_traj) then !Not totally sure that this is correct
         posn%uvel=this%uvel
         posn%vvel=this%vvel
