@@ -284,7 +284,6 @@ subroutine particles_run(parts, time, uo, vo, stagger)
   if (debug) call checksum_gridded(parts%grd, 's/r run after evolve')
   call send_parts_to_other_pes(parts)
   if (parts%debug_particle_with_id>0) call monitor_a_part(parts, 'particles_run, after send_parts() ')
-  call update_halo_particles(parts)
 
   ! For each part, record
   sample_traj = .true.

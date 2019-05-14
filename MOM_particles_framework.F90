@@ -192,7 +192,7 @@ type :: particles !; private
   logical :: restarted=.false. !< Indicate whether we read state from a restart or not
   logical :: Runge_not_Verlet=.True. !< True=Runge-Kutta, False=Verlet.
   logical :: ignore_missing_restart_parts=.False. !< True allows the model to ignore particles missing in the restart.
-  logical :: halo_debugging=.True. !< Use for debugging halos (remove when its working)
+  logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
   logical :: save_short_traj=.false. !< True saves only lon,lat,time,id in particle_trajectory.nc
   logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
   logical :: use_new_predictive_corrective =.False. !< Flag to use Bob's predictive corrective particle scheme- Added by Alon
@@ -247,7 +247,7 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
   logical :: grid_is_latlon=.True. ! True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
   logical :: grid_is_regular=.True. ! Flag to say whether point in cell can be found assuming regular Cartesian grid
   logical :: ignore_missing_restart_parts=.False. ! True Allows the model to ignore particles missing in the restart.
-  logical :: halo_debugging=.True. ! Use for debugging halos (remove when its working)
+  logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
   logical :: save_short_traj=.false. ! True saves only lon,lat,time,id in particle_trajectory.nc
   logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
   logical :: use_new_predictive_corrective =.False. ! Flag to use Bob's predictive corrective particle scheme- Added by Alon
