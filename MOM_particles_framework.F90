@@ -14,7 +14,7 @@ use mpp_mod, only: COMM_TAG_9, COMM_TAG_10
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, input_nml_file
 use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
 use mpp_domains_mod, only: domain2D
-use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
+use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID,CENTER
 use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
 use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain, mpp_get_global_domain
 use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
@@ -192,7 +192,7 @@ type :: particles !; private
   logical :: restarted=.false. !< Indicate whether we read state from a restart or not
   logical :: Runge_not_Verlet=.True. !< True=Runge-Kutta, False=Verlet.
   logical :: ignore_missing_restart_parts=.False. !< True allows the model to ignore particles missing in the restart.
-  logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
+  logical :: halo_debugging=.True. !< Use for debugging halos (remove when its working)
   logical :: save_short_traj=.false. !< True saves only lon,lat,time,id in particle_trajectory.nc
   logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
   logical :: use_new_predictive_corrective =.False. !< Flag to use Bob's predictive corrective particle scheme- Added by Alon
@@ -247,7 +247,7 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
   logical :: grid_is_latlon=.True. ! True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
   logical :: grid_is_regular=.True. ! Flag to say whether point in cell can be found assuming regular Cartesian grid
   logical :: ignore_missing_restart_parts=.False. ! True Allows the model to ignore particles missing in the restart.
-  logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
+  logical :: halo_debugging=.True. ! Use for debugging halos (remove when its working)
   logical :: save_short_traj=.false. ! True saves only lon,lat,time,id in particle_trajectory.nc
   logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
   logical :: use_new_predictive_corrective =.False. ! Flag to use Bob's predictive corrective particle scheme- Added by Alon
@@ -360,22 +360,22 @@ subroutine particles_framework_init(parts, Grid, Time, dt)
   !is=grd%isd; ie=grd%ied; js=grd%jsd; je=grd%jed
   grd%lon(is:ie,js:je)=Grid%geolonBu(is:ie,js:je)
   grd%lat(is:ie,js:je)=Grid%geolatBu(is:ie,js:je)
-  grd%area(is:ie,js:je)=Grid%areaT(is:ie,js:je) !sis2 has *(4.*pi*radius*radius)
+  grd%area(is:ie,js:je)=Grid%areaBu(is:ie,js:je) !sis2 has *(4.*pi*radius*radius)
   grd%ocean_depth(is:ie,js:je) = Grid%bathyT(is:ie,js:je)
   is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
-  grd%dx(is:ie,js:je)=Grid%dxT(is:ie,js:je)
-  grd%dy(is:ie,js:je)=Grid%dyT(is:ie,js:je)
-  grd%msk(is:ie,js:je)=Grid%mask2dT(is:ie,js:je)
+  grd%dx(is:ie,js:je)=Grid%dxBu(is:ie,js:je)
+  grd%dy(is:ie,js:je)=Grid%dyBu(is:ie,js:je)
+  grd%msk(is:ie,js:je)=Grid%mask2dBu(is:ie,js:je)
   grd%cos(is:ie,js:je)=Grid%cos_rot(is:ie,js:je)
   grd%sin(is:ie,js:je)=Grid%sin_rot(is:ie,js:je)
 
-  call mpp_update_domains(grd%lon, grd%domain, position=CORNER)
-  call mpp_update_domains(grd%lat, grd%domain, position=CORNER)
-  call mpp_update_domains(grd%dy, grd%dx, grd%domain, gridtype=CGRID_NE, flags=SCALAR_PAIR)
+  call mpp_update_domains(grd%lon, grd%domain)
+  call mpp_update_domains(grd%lat, grd%domain)
+  call mpp_update_domains(grd%dy, grd%dx, grd%domain, gridtype=BGRID_NE, flags=SCALAR_PAIR)
   call mpp_update_domains(grd%area, grd%domain)
   call mpp_update_domains(grd%msk, grd%domain)
-  call mpp_update_domains(grd%cos, grd%domain, position=CORNER)
-  call mpp_update_domains(grd%sin, grd%domain, position=CORNER)
+  call mpp_update_domains(grd%cos, grd%domain, position=CENTER)
+  call mpp_update_domains(grd%sin, grd%domain, position=CENTER)
   call mpp_update_domains(grd%ocean_depth, grd%domain)
   call mpp_update_domains(grd%parity_x, grd%parity_y, grd%domain, gridtype=AGRID) ! If either parity_x/y is -ve, we need rotation of vectors
 

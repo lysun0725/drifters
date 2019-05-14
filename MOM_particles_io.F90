@@ -302,7 +302,7 @@ subroutine read_restart_parts(parts,Time, u, v)
 ! Arguments
 type(particles), pointer :: parts
 type(time_type), intent(in) :: Time
-real, dimension(:,:,:) :: u, v
+real, dimension(:,:,:),intent(in) :: u, v
 
 !Local variables
 integer :: k, siz(4), nparts_in_file, nparts_read
@@ -341,13 +341,13 @@ integer, allocatable, dimension(:) :: id_cnt, &
   !LUYU: uo and vo are intialized in terms of CGRID; will convert this to BGRID in particles_run
   do j=grd%jsd,grd%jed
     do i=grd%isd,grd%ied
-       grd%uo(i,j) = u(i,j,1)
+       grd%uo(i,j) = 0.5*(u(i,j,1)+u(i,j+1,1))
     enddo
   enddo
 
   do j=grd%jsd,grd%jed
     do i=grd%isd,grd%ied
-       grd%vo(i,j) = v(i,j,1)
+       grd%vo(i,j) = 0.5*(v(i,j,1)+v(i+1,j,1))
     enddo
   enddo
 

@@ -70,7 +70,7 @@ subroutine particles_init(parts, Grid, Time, dt, u, v)
  type(ocean_grid_type), target, intent(in) :: Grid !< Grid type from parent model
  type(time_type), intent(in) :: Time !< Time type from parent model
  real, intent(in)            :: dt !< particle timestep in seconds
- real, dimension(:,:,:)      :: u, v !< Horizontal velocity fields
+ real, dimension(:,:,:),intent(in)      :: u, v !< Horizontal velocity fields
 
  integer :: io_layout(2)
  integer :: stdlogunit, stderrunit
@@ -258,10 +258,10 @@ subroutine particles_run(parts, time, uo, vo, stagger)
  ! grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec) = uo(grd%isc:grd%iec,grd%jsc:grd%jec)
  ! grd%vo(grd%isc:grd%iec,grd%jsc:grd%jec) = vo(grd%isc:grd%iec,grd%jsc:grd%jec)
  ! LUYU: convert CGRID to BGRID.
-  grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec) = 0.5*(uo(grd%isc:grd%iec,grd%jsc:grd%jec)+uo(grd%isc:grd%iec,grd%jsc+1:grd%jec+1))
-  grd%vo(grd%isc:grd%iec,grd%jsc:grd%jec) = 0.5*(vo(grd%isc:grd%iec,grd%jsc:grd%jec)+vo(grd%isc+1:grd%iec+1,grd%jsc:grd%jec))
+  grd%uo(grd%isd:grd%ied,grd%jsd:grd%jed) = 0.5*(uo(grd%isd:grd%ied,grd%jsd:grd%jed)+uo(grd%isd:grd%ied,grd%jsd+1:grd%jed+1))
+  grd%vo(grd%isd:grd%ied,grd%jsd:grd%jed) = 0.5*(vo(grd%isd:grd%ied,grd%jsd:grd%jed)+vo(grd%isd+1:grd%ied+1,grd%jsd:grd%jed))
  ! call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=CGRID_NE)
-  call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
+ ! call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
 
   ! Make sure that gridded values agree with mask  (to get ride of NaN values)
   do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
@@ -284,6 +284,7 @@ subroutine particles_run(parts, time, uo, vo, stagger)
   if (debug) call checksum_gridded(parts%grd, 's/r run after evolve')
   call send_parts_to_other_pes(parts)
   if (parts%debug_particle_with_id>0) call monitor_a_part(parts, 'particles_run, after send_parts() ')
+  call update_halo_particles(parts)
 
   ! For each part, record
   sample_traj = .true.
