@@ -109,9 +109,10 @@ end subroutine particles_io_init
 ! ##############################################################################
 
 !> Write an particle restart file
-subroutine write_restart(parts)
+subroutine write_restart(parts,temp,salt)
 ! Arguments
 type(particles), pointer :: parts !< particles container
+real,dimension(:,:),optional,intent(in) :: temp, salt
 ! Local variables
 !type(bond), pointer :: current_bond
 integer :: i,j,id
@@ -136,9 +137,10 @@ real, allocatable, dimension(:) :: lon,          &
 !                                   bxn,          &
 !                                   byn,          &
                                    start_lon,    &
-                                   start_lat!,    &
+                                   start_lat,    &
 !                                   start_day
-
+                                   dr_temp,      &
+                                   dr_salt
 
 
 integer, allocatable, dimension(:) :: ine,              &
@@ -188,7 +190,8 @@ integer :: grdi, grdj
    allocate(start_lon(nparts))
    allocate(start_lat(nparts))
 !   allocate(start_day(nparts))
-
+   allocate(dr_temp(nparts))
+   allocate(dr_salt(nparts))
 
    allocate(ine(nparts))
    allocate(jne(nparts))
@@ -213,6 +216,11 @@ integer :: grdi, grdj
   id = register_restart_field(parts_restart,filename,'depth',depth,longname='depth below surface',units='m')
   id = register_restart_field(parts_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
   id = register_restart_field(parts_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
+
+  if (present(temp) .and. present(salt)) then
+    id = register_restart_field(parts_restart,filename,'temp',dr_temp,longname='Potential Temperature',units='degC')
+    id = register_restart_field(parts_restart,filename,'salt',dr_salt,longname='Salinity',units='PPT')
+  endif
 !  if (.not. parts%Runge_not_Verlet) then
 !    id = register_restart_field(parts_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2')
 !    id = register_restart_field(parts_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2')
@@ -252,6 +260,10 @@ integer :: grdi, grdj
 !      start_year(i) = this%start_year; start_day(i) = this%start_day
       id_cnt(i) = this%id; drifter_num(i) = this%drifter_num !; id_ij(i) = this%id
       call split_id(this%id, id_cnt(i), id_ij(i))
+      if (present(temp) .and. present(salt)) then
+        dr_temp(i)=bilin(grd,temp(grd%isd:grd%ied,grd%jsd:grd%jed),this%ine,this%jne,this%xi,this%yj)
+        dr_salt(i)=bilin(grd,salt(grd%isd:grd%ied,grd%jsd:grd%jed),this%ine,this%jne,this%xi,this%yj)
+      endif
       this=>this%next
     enddo
   enddo ; enddo
@@ -273,6 +285,10 @@ integer :: grdi, grdj
              start_lon,    &
              start_lat)    !,    &
 !             start_day  )
+
+  deallocate(           &
+             dr_temp,   &
+             dr_salt)
 
 
   deallocate(           &

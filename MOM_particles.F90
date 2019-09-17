@@ -943,16 +943,22 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
 
 ! ###################################################################################
 
-subroutine particles_save_restart(parts)
+subroutine particles_save_restart(parts,temp,salt)
 ! Arguments
 type(particles), pointer :: parts
+real,dimension(:,:),optional,intent(in) :: temp, salt
+
 ! Local variables
 
   if (.not.associated(parts)) return
 
   call mpp_clock_begin(parts%clock_iow)
   call parts_chksum(parts, 'write_restart parts')
-  call write_restart(parts)
+  if (present(temp) .and. present(salt)) then
+    call write_restart(parts,temp,salt)
+  else
+    call write_restart(parts)
+  endif
   call mpp_clock_end(parts%clock_iow)
 
 end subroutine particles_save_restart
