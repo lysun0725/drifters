@@ -1,8 +1,9 @@
 module MOM_particles_mod
 
-use constants_mod, only: radius, pi, omega, HLF
-use MOM_grid, only : ocean_grid_type
+use constants_mod,    only: radius, pi, omega, HLF
+use MOM_grid,         only : ocean_grid_type
 use MOM_time_manager, only : time_type, get_date, operator(-)
+use MOM_variables,    only : thermo_var_ptrs
 
 use fms_mod, only: field_exist, get_global_att_value
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
@@ -193,12 +194,26 @@ end subroutine accel
 ! ##############################################################################
 
 !> The main driver the steps updates particles
-subroutine particles_run(parts, time, uo, vo, stagger)
+subroutine particles_run(parts, time, uo, vo, ho, uho, uhtro, vho, vhtro, & 
+                        time_in_thermo_cycle, tv, diabatic_first, dt_therm, &
+                        thermo_spans_coupling, stagger)
   ! Arguments
   type(particles), pointer :: parts !< Container for all types and memory
   type(time_type), intent(in) :: time !< Model time
-  real, dimension(:,:),intent(in) :: uo !< Ocean zonal velocity (m/s)
-  real, dimension(:,:),intent(in) :: vo !< Ocean meridional velocity (m/s)
+  real, dimension(:,:,:),intent(in) :: uo !< Ocean zonal velocity (m/s)
+  real, dimension(:,:,:),intent(in) :: vo !< Ocean meridional velocity (m/s)
+  real, dimension(:,:,:),intent(in) :: ho !< Ocean layer thickness [H ~> m or kg m-2]
+  real, dimension(:,:,:),intent(in) :: uho !< uh = u * h * dy at u grid points [H L2 T-1 ~> m3 s-1 or kg s-1]
+  real, dimension(:,:,:),intent(in) :: uhtro !< accumulated zonal thickness fluxes to advect tracers [H L2 ~> m3 or kg]
+  real, dimension(:,:,:),intent(in) :: vho !< vh = v * h * dx at v grid points [H L2 T-1 ~> m3 s-1 or kg s-1]
+  real, dimension(:,:,:),intent(in) :: vhtro !< accumulated meridional thickness fluxes to advect tracers [H L2 ~> m3 or kg]
+  real, intent(in) :: time_in_thermo_cycle !< The running time of the current time-stepping
+                    !! cycle in calls that step the thermodynamics [s].
+  type(thermo_var_ptrs), intent(in) :: tv !< structure containing pointers to available thermodynamic fields
+  logical, intent(in) :: diabatic_first !< If true, apply diabatic and thermodynamic processes before time
+                    !! stepping the dynamics.
+  real, intent(in)    :: dt_therm                !< thermodynamics time step [s]
+  logical, intent(in) :: thermo_spans_coupling   !< If true, thermodynamic and tracer time
   integer, optional, intent(in) :: stagger
 
   ! Local variables
@@ -254,14 +269,10 @@ subroutine particles_run(parts, time, uo, vo, stagger)
 
  !call sanitize_field(grd%calving,1.e20)
 
- ! Straight copy of ocean velocities
- ! grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec) = uo(grd%isc:grd%iec,grd%jsc:grd%jec)
- ! grd%vo(grd%isc:grd%iec,grd%jsc:grd%jec) = vo(grd%isc:grd%iec,grd%jsc:grd%jec)
  ! LUYU: convert CGRID to BGRID.
-  grd%uo(grd%isd:grd%ied,grd%jsd:grd%jed) = 0.5*(uo(grd%isd:grd%ied,grd%jsd:grd%jed)+uo(grd%isd:grd%ied,grd%jsd+1:grd%jed+1))
-  grd%vo(grd%isd:grd%ied,grd%jsd:grd%jed) = 0.5*(vo(grd%isd:grd%ied,grd%jsd:grd%jed)+vo(grd%isd+1:grd%ied+1,grd%jsd:grd%jed))
- ! call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=CGRID_NE)
- ! call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
+ ! LUYU: only pass the ocean velocities at the surface layer. 
+  grd%uo(grd%isd:grd%ied,grd%jsd:grd%jed) = 0.5*(uo(grd%isd:grd%ied,grd%jsd:grd%jed,1)+uo(grd%isd:grd%ied,grd%jsd+1:grd%jed+1,1))
+  grd%vo(grd%isd:grd%ied,grd%jsd:grd%jed) = 0.5*(vo(grd%isd:grd%ied,grd%jsd:grd%jed,1)+vo(grd%isd+1:grd%ied+1,grd%jsd:grd%jed,1))
 
   ! Make sure that gridded values agree with mask  (to get ride of NaN values)
   do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
