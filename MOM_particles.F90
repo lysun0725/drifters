@@ -194,26 +194,14 @@ end subroutine accel
 ! ##############################################################################
 
 !> The main driver the steps updates particles
-subroutine particles_run(parts, time, uo, vo, ho, uho, uhtro, vho, vhtro, & 
-                        time_in_thermo_cycle, tv, diabatic_first, dt_therm, &
-                        thermo_spans_coupling, stagger)
+subroutine particles_run(parts, time, uo, vo, ho, tv, stagger)
   ! Arguments
   type(particles), pointer :: parts !< Container for all types and memory
   type(time_type), intent(in) :: time !< Model time
   real, dimension(:,:,:),intent(in) :: uo !< Ocean zonal velocity (m/s)
   real, dimension(:,:,:),intent(in) :: vo !< Ocean meridional velocity (m/s)
   real, dimension(:,:,:),intent(in) :: ho !< Ocean layer thickness [H ~> m or kg m-2]
-  real, dimension(:,:,:),intent(in) :: uho !< uh = u * h * dy at u grid points [H L2 T-1 ~> m3 s-1 or kg s-1]
-  real, dimension(:,:,:),intent(in) :: uhtro !< accumulated zonal thickness fluxes to advect tracers [H L2 ~> m3 or kg]
-  real, dimension(:,:,:),intent(in) :: vho !< vh = v * h * dx at v grid points [H L2 T-1 ~> m3 s-1 or kg s-1]
-  real, dimension(:,:,:),intent(in) :: vhtro !< accumulated meridional thickness fluxes to advect tracers [H L2 ~> m3 or kg]
-  real, intent(in) :: time_in_thermo_cycle !< The running time of the current time-stepping
-                    !! cycle in calls that step the thermodynamics [s].
   type(thermo_var_ptrs), intent(in) :: tv !< structure containing pointers to available thermodynamic fields
-  logical, intent(in) :: diabatic_first !< If true, apply diabatic and thermodynamic processes before time
-                    !! stepping the dynamics.
-  real, intent(in)    :: dt_therm                !< thermodynamics time step [s]
-  logical, intent(in) :: thermo_spans_coupling   !< If true, thermodynamic and tracer time
   integer, optional, intent(in) :: stagger
 
   ! Local variables
