@@ -945,7 +945,7 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
 subroutine particles_save_restart(parts,temp,salt)
 ! Arguments
 type(particles), pointer :: parts
-real,dimension(:,:),optional,intent(in) :: temp, salt
+real,dimension(:,:,:),optional,intent(in) :: temp, salt
 
 ! Local variables
 
@@ -964,9 +964,10 @@ end subroutine particles_save_restart
 
 ! ##############################################################################
 
-subroutine particles_end(parts)
+subroutine particles_end(parts,temp,salt)
 ! Arguments
 type(particles), pointer :: parts
+real,dimension(:,:,:),optional,intent(in) :: temp, salt
 ! Local variables
 type(particle), pointer :: this, next
 
@@ -976,7 +977,11 @@ type(particle), pointer :: this, next
   ! we do not need to call it a second time. If particles were controlled
   ! by the coupler then the particles would need to take responsibility for
   ! the restarts at the end of the run.
-  call particles_save_restart(parts)
+  if (present(temp) .and. present(salt)) then
+    call particles_save_restart(parts,temp,salt)
+  else
+    call particles_save_restart(parts)
+  endif
 
   call mpp_clock_begin(parts%clock_ini)
   ! Delete parts and structures

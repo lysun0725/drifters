@@ -112,7 +112,7 @@ end subroutine particles_io_init
 subroutine write_restart(parts,temp,salt)
 ! Arguments
 type(particles), pointer :: parts !< particles container
-real,dimension(:,:),optional,intent(in) :: temp, salt
+real,dimension(:,:,:),optional,intent(in) :: temp, salt
 ! Local variables
 !type(bond), pointer :: current_bond
 integer :: i,j,id
@@ -261,8 +261,9 @@ integer :: grdi, grdj
       id_cnt(i) = this%id; drifter_num(i) = this%drifter_num !; id_ij(i) = this%id
       call split_id(this%id, id_cnt(i), id_ij(i))
       if (present(temp) .and. present(salt)) then
-        dr_temp(i)=bilin(grd,temp(grd%isd:grd%ied,grd%jsd:grd%jed),this%ine,this%jne,this%xi,this%yj)
-        dr_salt(i)=bilin(grd,salt(grd%isd:grd%ied,grd%jsd:grd%jed),this%ine,this%jne,this%xi,this%yj)
+        !LUYU: pass the ocean temp and ocean salt at the surface layer to drifters
+        dr_temp(i)=bilin(grd,temp(grd%isd:grd%ied,grd%jsd:grd%jed,1),this%ine,this%jne,this%xi,this%yj)
+        dr_salt(i)=bilin(grd,salt(grd%isd:grd%ied,grd%jsd:grd%jed,1),this%ine,this%jne,this%xi,this%yj)
       endif
       this=>this%next
     enddo
